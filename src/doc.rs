@@ -3,7 +3,7 @@
 //!
 //! ```yaml
 //! compose:
-//!   stack:  { storage: NetApp, size: 8G, owner: "1000:1000", project: wiki }
+//!   stack:  { owner: "1000:1000" }
 //!   policy: { pct: auto, docker: auto, pull: manual }
 //!   spec:   # the compose document, verbatim structure
 //!     services: ...
@@ -18,14 +18,14 @@
 //! There is deliberately no `pct` section: cores, memory, extra features,
 //! network and onboot are the guest's PVE config, edited there. The wrapper
 //! settings this tool owns are derived, not configured: the `nesting` and
-//! `keyctl` features docker needs, the stack disk, the managed volumes.
+//! `keyctl` features docker needs, and the managed volumes. The stack itself
+//! lives on the rootfs at `/opt/stack`; only `x-pve` volumes get disks.
 
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Deserializer};
 use sha2::{Digest as _, Sha256};
 
 use crate::cmd;
-use crate::size::Size;
 use crate::PREFIX;
 
 #[derive(Debug, Clone, Deserialize, Default)]
@@ -41,11 +41,8 @@ pub struct Doc {
 #[derive(Debug, Clone, Deserialize, Default)]
 #[serde(deny_unknown_fields)]
 pub struct Stack {
-    pub storage: Option<String>,
-    pub size: Option<Size>,
+    /// `uid:gid` for volume directories and for `${PVE_UID}`/`${PVE_GID}`.
     pub owner: Option<String>,
-    /// The compose project name; the guest's hostname when unset.
-    pub project: Option<String>,
 }
 
 /// When the daemon acts on its own. `Manual` means only a hand-run verb does.
@@ -161,11 +158,6 @@ pub fn parse(text: &str) -> Result<Doc> {
     if let Some(o) = &doc.stack.owner {
         crate::spec::split_owner(o).context("compose.stack.owner")?;
     }
-    if let Some(p) = &doc.stack.project {
-        if !is_project_name(p) {
-            bail!("compose.stack.project '{p}': a compose project name is lowercase letters, digits, '-' and '_', starting with a letter or digit");
-        }
-    }
     Ok(doc)
 }
 
@@ -240,7 +232,7 @@ mod tests {
         assert_eq!(d.policy.pct, Mode::Auto);
         assert_eq!(d.policy.docker, Mode::Auto);
         assert_eq!(d.policy.pull, Mode::Manual);
-        assert!(d.stack.storage.is_none());
+        assert!(d.stack.owner.is_none());
     }
 
     #[test]
@@ -268,8 +260,8 @@ mod tests {
 
     #[test]
     fn project_and_owner_are_validated() {
-        assert!(parse("stack: { project: Wiki }\nspec: {}\n").is_err());
-        assert!(parse("stack: { project: \"a'b\" }\nspec: {}\n").is_err());
+        assert!(parse("stack: { project: wiki }\nspec: {}\n").is_err());
+        assert!(parse("stack: { storage: x }\nspec: {}\n").is_err());
         assert!(parse("stack: { owner: \"1000:1000\" }\nspec: {}\n").is_ok());
         assert!(parse("stack: { owner: \"root:root\" }\nspec: {}\n").is_err());
         assert_eq!(project_name_from("Wiki"), "wiki");

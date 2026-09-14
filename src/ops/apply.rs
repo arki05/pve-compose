@@ -7,25 +7,21 @@
 //!
 //! A changed `features` line only takes effect on restart, and docker cannot
 //! start without `nesting`. So when the plan changed features, `apply` stops
-//! after the pct half and says so, unless asked to reboot the guest itself.
+//! after the pct half and says so.
 
 use anyhow::{bail, Result};
 
 use crate::lock::GuestLock;
 use crate::ops::{self, provision, Ctx, Guest};
-use crate::pct;
 use crate::plan::{self, Op};
 use crate::spec::{self, Vars};
 use crate::stack;
-use crate::STACK_DIR;
 
 /// How `apply` and `upgrade` behave beyond the default.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct Options {
     /// `docker compose pull` before `up`.
     pub pull: bool,
-    /// Reboot the guest when the plan changed its features, then continue.
-    pub reboot: bool,
     /// Render and push the compose file, write the facts, but never
     /// `compose up`.
     pub no_up: bool,
@@ -48,16 +44,16 @@ pub fn pct_plan(ctx: &Ctx, g: &Guest) -> Result<plan::Plan> {
 }
 
 /// The pct half, under the guest's lock.
-pub fn pct_apply(ctx: &Ctx, vmid: u32, o: Options) -> Result<usize> {
+pub fn pct_apply(ctx: &Ctx, vmid: u32) -> Result<usize> {
     let _lock = GuestLock::take(vmid, 60)?;
     ops::require_running(ctx, vmid)?;
     let g = ops::load(ctx, vmid)?;
-    pct_apply_guest(ctx, &g, o)
+    pct_apply_guest(ctx, &g)
 }
 
 /// The pct half for a loaded guest whose lock the caller holds. Returns the
 /// number of operations run.
-pub fn pct_apply_guest(ctx: &Ctx, g: &Guest, o: Options) -> Result<usize> {
+pub fn pct_apply_guest(ctx: &Ctx, g: &Guest) -> Result<usize> {
     let vmid = g.vmid();
     let p = pct_plan(ctx, g)?;
     for n in &p.notes {
@@ -80,15 +76,9 @@ pub fn pct_apply_guest(ctx: &Ctx, g: &Guest, o: Options) -> Result<usize> {
     }
     executed?;
     if features_changed {
-        if o.reboot {
-            eprintln!("pct: features changed; rebooting {vmid}");
-            pct::reboot(vmid)?;
-            pct::wait_ready(vmid, 90)?;
-        } else {
-            bail!(
-                "guest {vmid}: features changed and take effect on restart; `pct reboot {vmid}`, then apply again (or apply --reboot)"
-            );
-        }
+        bail!(
+            "guest {vmid}: features changed and take effect on restart; `pct reboot {vmid}`, then apply again"
+        );
     }
     Ok(p.ops.len())
 }
@@ -123,12 +113,6 @@ pub fn docker_apply(ctx: &Ctx, vmid: u32, o: Options) -> Result<()> {
 /// the stack was brought up.
 pub fn docker_apply_guest(ctx: &Ctx, g: &Guest, o: Options) -> Result<bool> {
     let vmid = g.vmid();
-    if g.config.mount_at(STACK_DIR).is_none() {
-        bail!("guest {vmid}: no stack disk at {STACK_DIR} yet; run `pve-compose pct apply {vmid}` first");
-    }
-    if !stack::stack_is_mounted(vmid)? {
-        bail!("guest {vmid}: {STACK_DIR} is not mounted inside the guest");
-    }
     provision::ensure_docker(vmid)?;
 
     let default_owner = g.owner(ctx);
@@ -196,7 +180,7 @@ pub fn apply(ctx: &Ctx, vmid: u32, o: Options) -> Result<()> {
 pub fn apply_locked(ctx: &Ctx, vmid: u32, o: Options) -> Result<()> {
     ops::require_running(ctx, vmid)?;
     let g = ops::load(ctx, vmid)?;
-    let changed = pct_apply_guest(ctx, &g, o)?;
+    let changed = pct_apply_guest(ctx, &g)?;
     let g = if changed > 0 {
         ops::refresh_config(ctx, g)?
     } else {

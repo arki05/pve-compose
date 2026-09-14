@@ -3,6 +3,7 @@
 //! and notes. `execute` runs the operations through `pct`.
 //!
 //! Rules (docs/DESIGN.md):
+//! * the stack directory is on the rootfs; only `x-pve` volumes get disks;
 //! * a managed disk is identified by its mount path, never by its index;
 //! * disks grow, never shrink, never move, are never deleted by this tool;
 //! * a mount under the volumes directory with no volume in the document is
@@ -17,7 +18,7 @@ use crate::doc::Doc;
 use crate::pct::{self, GuestConfig, Mount};
 use crate::size::Size;
 use crate::spec::{Kind, Volume};
-use crate::{STACK_DIR, VOLUMES_DIR};
+use crate::VOLUMES_DIR;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Op {
@@ -114,7 +115,6 @@ fn disk_size_satisfied(have: Option<Size>, want: Size) -> bool {
 pub fn build(i: &Inputs<'_>) -> Result<Plan> {
     let mut plan = Plan::default();
     let g = i.guest;
-    let d = i.doc;
 
     if g.is_template {
         bail!("guest {} is a template", g.vmid);
@@ -150,52 +150,6 @@ pub fn build(i: &Inputs<'_>) -> Result<Plan> {
 
     let default_storage = i.config.storage_for(i.node);
 
-    // The stack disk.
-    let stack_storage = d
-        .stack
-        .storage
-        .clone()
-        .unwrap_or_else(|| default_storage.clone());
-    let stack_size = d.stack.size.unwrap_or(i.config.defaults.stack_size);
-    match g.mount_at(STACK_DIR) {
-        None => plan.ops.push(Op::CreateDisk {
-            mp: STACK_DIR.into(),
-            storage: stack_storage,
-            size: stack_size,
-            backup: true,
-        }),
-        Some(m) => {
-            if m.is_bind() {
-                plan.notes.push(format!(
-                    "{STACK_DIR} is a bind mount of {}; leaving it",
-                    m.volume
-                ));
-            } else {
-                if let Some(st) = m.storage() {
-                    if st != stack_storage {
-                        plan.notes.push(format!(
-                            "{STACK_DIR} is on {st}, document says {stack_storage}; disks are never moved"
-                        ));
-                    }
-                }
-                if !disk_size_satisfied(m.size, stack_size) {
-                    plan.ops.push(Op::Resize {
-                        key: m.key.clone(),
-                        mp: STACK_DIR.into(),
-                        from: m.size.unwrap_or(Size(0)),
-                        to: stack_size,
-                    });
-                }
-                if !m.backup {
-                    plan.ops.push(Op::SetBackup {
-                        mount: m.clone(),
-                        backup: true,
-                    });
-                }
-            }
-        }
-    }
-
     // Managed volumes.
     for v in i.volumes {
         let dir = v.dir();
@@ -228,7 +182,12 @@ pub fn build(i: &Inputs<'_>) -> Result<Plan> {
                 }
             },
             Kind::Disk { storage, size } => {
-                let storage = storage.clone().unwrap_or_else(|| default_storage.clone());
+                let Some(storage) = storage.clone().or_else(|| default_storage.clone()) else {
+                    bail!(
+                        "volume {}: no storage: name one in x-pve, or set this node's default with `pve-compose config set storage <storage>`",
+                        v.name
+                    );
+                };
                 match g.mount_at(&dir) {
                     None => plan.ops.push(Op::CreateDisk {
                         mp: dir,
@@ -362,6 +321,10 @@ mod tests {
         crate::doc::parse(yaml).unwrap()
     }
 
+    fn node_cfg(storage: &str) -> Config {
+        serde_yaml_ng::from_str(&format!("nodes:\n  n: {{ storage: {storage} }}\n")).unwrap()
+    }
+
     #[test]
     fn size_tolerance_is_one_mib() {
         let want = Size(20 << 30);
@@ -385,7 +348,7 @@ mod tests {
         );
         let d = doc("spec:\n  volumes:\n    db: { x-pve: { size: 20G } }\n    media: { x-pve: { path: /m } }\n    c:\n");
         let vols = spec::volumes(&d.spec).unwrap();
-        let cfg = Config::default();
+        let cfg = node_cfg("local-lvm");
         let p = build(&Inputs {
             node: "n",
             config: &cfg,
@@ -402,10 +365,27 @@ mod tests {
             "{s:?}"
         );
         assert!(s.contains(&"tag: add 'compose'".to_string()));
-        assert!(s.contains(&"disk: create 4G on local-lvm at /opt/stack".to_string()));
         assert!(s.contains(&"disk: create 20G on local-lvm at /opt/stack/volumes/db".to_string()));
         assert!(s.contains(&"bind: /m at /opt/stack/volumes/media".to_string()));
-        assert_eq!(p.ops.len(), 5);
+        assert_eq!(p.ops.len(), 4);
+    }
+
+    #[test]
+    fn a_disk_without_any_storage_is_refused() {
+        let g = guest(r#"{"unprivileged":1,"tags":"compose","features":"nesting=1,keyctl=1"}"#);
+        let d = doc("spec:\n  volumes:\n    db: { x-pve: { size: 20G } }\n");
+        let vols = spec::volumes(&d.spec).unwrap();
+        let cfg = Config::default();
+        let err = build(&Inputs {
+            node: "n",
+            config: &cfg,
+            tag: Some("compose"),
+            guest: &g,
+            doc: &d,
+            volumes: &vols,
+        })
+        .unwrap_err();
+        assert!(err.to_string().contains("config set storage"), "{err}");
     }
 
     #[test]
@@ -417,7 +397,7 @@ mod tests {
         );
         let d = doc("spec:\n  volumes:\n    db: { x-pve: { size: 20G } }\n");
         let vols = spec::volumes(&d.spec).unwrap();
-        let cfg = Config::default();
+        let cfg = node_cfg("local-lvm");
         let p = build(&Inputs {
             node: "n",
             config: &cfg,
@@ -442,7 +422,7 @@ mod tests {
         );
         let d = doc("spec:\n  volumes:\n    db: { x-pve: { size: 20G } }\n    big: { x-pve: { size: 10G, backup: 0 } }\n");
         let vols = spec::volumes(&d.spec).unwrap();
-        let cfg = Config::default();
+        let cfg = node_cfg("local-lvm");
         let p = build(&Inputs {
             node: "n",
             config: &cfg,
@@ -467,20 +447,21 @@ mod tests {
     #[test]
     fn node_storage_default_applies() {
         let g = guest(r#"{"unprivileged":1,"tags":"compose","features":"nesting=1,keyctl=1"}"#);
-        let d = doc("spec: {}\n");
-        let cfg: Config = serde_yaml_ng::from_str("nodes:\n  n: { storage: NetApp }\n").unwrap();
+        let d = doc("spec:\n  volumes:\n    db: { x-pve: { size: 2G } }\n");
+        let vols = spec::volumes(&d.spec).unwrap();
+        let cfg = node_cfg("NetApp");
         let p = build(&Inputs {
             node: "n",
             config: &cfg,
-            tag: Some("compose"),
+            tag: None,
             guest: &g,
             doc: &d,
-            volumes: &[],
+            volumes: &vols,
         })
         .unwrap();
         assert_eq!(
             p.ops[0].to_string(),
-            "disk: create 4G on NetApp at /opt/stack"
+            "disk: create 2G on NetApp at /opt/stack/volumes/db"
         );
     }
 }

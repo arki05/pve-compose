@@ -6,7 +6,6 @@ use anyhow::Result;
 
 use crate::ops::{self, apply, Ctx, Guest};
 use crate::stack;
-use crate::STACK_DIR;
 
 pub fn pct_diff(ctx: &Ctx, vmid: u32) -> Result<()> {
     pct_diff_guest(ctx, &ops::load(ctx, vmid)?)
@@ -33,10 +32,6 @@ pub fn docker_diff(ctx: &Ctx, vmid: u32) -> Result<()> {
 
 pub fn docker_diff_guest(ctx: &Ctx, g: &Guest) -> Result<()> {
     let vmid = g.vmid();
-    if g.config.mount_at(STACK_DIR).is_none() {
-        println!("docker: no stack disk yet (pct apply creates it)");
-        return Ok(());
-    }
     ops::require_running(ctx, vmid)?;
     let want = apply::render(ctx, g)?;
     let have = stack::read_compose(vmid)?.unwrap_or_default();

@@ -2,6 +2,7 @@
 //! could also do by hand with `pct`, `pve-meta` and `docker compose`.
 
 pub mod apply;
+pub mod configcmd;
 pub mod daemon;
 pub mod diff;
 pub mod new;
@@ -89,12 +90,8 @@ impl Guest {
         self.config.vmid
     }
 
-    /// The compose project name: the document's, else the hostname made
-    /// into one.
+    /// The compose project name: the hostname made into one.
     pub fn project(&self) -> String {
-        if let Some(p) = &self.read.doc.stack.project {
-            return p.clone();
-        }
         match &self.config.hostname {
             Some(h) => doc::project_name_from(h),
             None => format!("ct{}", self.vmid()),

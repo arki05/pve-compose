@@ -1,7 +1,7 @@
 //! Inside the guest: the stack directory, the facts file, and running compose.
 //!
 //! ```text
-//! /opt/stack/                     mp0, the stack disk
+//! /opt/stack/                     on the rootfs
 //!   compose.yaml                  rendered from the document (spec::render)
 //!   .env                          the user's, never touched
 //!   volumes/<name>/               one per compose volume
@@ -62,13 +62,6 @@ pub fn facts_now(digest: &str, previous: Option<Facts>) -> Facts {
         applied_at: chrono::Local::now().to_rfc3339(),
         by: env!("CARGO_PKG_VERSION").to_string(),
     }
-}
-
-/// Whether the stack directory is a mounted disk, not a directory on the
-/// rootfs. An apply refuses to write a stack onto the rootfs.
-pub fn stack_is_mounted(vmid: u32) -> Result<bool> {
-    let out = pct::exec_status(vmid, &format!("findmnt -n {STACK_DIR} >/dev/null 2>&1"))?;
-    Ok(out.status == 0)
 }
 
 /// Makes the stack layout exist, with the volume directories owned as asked.

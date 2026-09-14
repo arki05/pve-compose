@@ -13,6 +13,10 @@
 //! by hand, the loop renders and pushes the compose file so the pending
 //! state lands, and does not start anything: starting is a human's act.
 //!
+//! The stored choices are re-read before every pass: a `config set storage`
+//! on the node takes effect at the next poll, and a changed config drops the
+//! memo so a guest refused for lack of a storage is planned again.
+//!
 //! Single-threaded on purpose: one guest at a time, in vmid order. A guest
 //! whose apply is slow (a first docker install) delays the others on the
 //! node for that long. Acceptable for the scale this is built for, and one
@@ -24,6 +28,7 @@ use std::time::{Duration, Instant};
 use anyhow::Result;
 
 use crate::cmd;
+use crate::config::Config;
 use crate::doc::{self, Mode};
 use crate::ops::{self, apply, Ctx};
 use crate::pct;
@@ -33,7 +38,7 @@ struct Memo {
     digest: String,
 }
 
-pub fn run(ctx: &Ctx) -> Result<()> {
+pub fn run(mut ctx: Ctx) -> Result<()> {
     let interval = Duration::from_secs(ctx.config.daemon.interval.max(5));
     let full_every = Duration::from_secs(ctx.config.daemon.full_every.max(60));
     let mut last_token = String::new();
@@ -59,12 +64,21 @@ pub fn run(ctx: &Ctx) -> Result<()> {
             }
         };
         let full = last_full.elapsed() >= full_every;
+        match Config::load() {
+            Ok(c) if c != ctx.config => {
+                eprintln!("configuration changed; planning every guest again");
+                ctx.config = c;
+                memo.clear();
+            }
+            Ok(_) => {}
+            Err(e) => eprintln!("configuration not re-read: {e}"),
+        }
         if token != last_token || full {
             if full {
                 memo.clear();
                 last_full = Instant::now();
             }
-            if let Err(e) = pass(ctx, &mut memo) {
+            if let Err(e) = pass(&ctx, &mut memo) {
                 eprintln!("pass failed: {e}");
             }
             last_token = token;
@@ -100,7 +114,7 @@ fn pass(ctx: &Ctx, memo: &mut HashMap<u32, Memo>) -> Result<()> {
             let _lock = crate::lock::GuestLock::take(vmid, 60)?;
             let mut g = ops::load_with(ctx, read)?;
             if policy.pct == Mode::Auto {
-                let n = apply::pct_apply_guest(ctx, &g, apply::Options::default())?;
+                let n = apply::pct_apply_guest(ctx, &g)?;
                 if n > 0 {
                     eprintln!("{vmid}: pct applied {n} change(s)");
                     g = ops::refresh_config(ctx, g)?;

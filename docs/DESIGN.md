@@ -3,7 +3,7 @@
 What is true of the code, and the decisions behind the parts that are not
 obvious. The README says how to use it.
 
-## The document is intent; facts live on the stack disk
+## The document is intent; facts live in the guest
 
 `compose.spec` and the few keys beside it describe what should run. What *was*
 applied (the document digest, the template the wrapper came from, when) is
@@ -12,7 +12,7 @@ document. Three reasons, all concrete: a status write would move pve-meta's
 version token and wake the loop that wrote it; the applied digest cannot be
 stored in the thing it digests; and pve-meta's compare-and-swap is per document,
 so an operator writing facts while a human edits intent in the UI would make the
-human's Apply fail with a 409. Facts on the stack disk move with the guest, roll
+human's Apply fail with a 409. Facts under `/opt/stack` move with the guest, roll
 back with the guest's snapshot together with the document, and are in the
 guest's backup.
 
@@ -25,9 +25,34 @@ disk is the honest place.
 Cores, memory, network, `onboot`, extra features: PVE already stores and edits
 these well, and a user changing them in the guest's config must simply work.
 The wrapper settings this tool owns are *derived*, not configured: the two
-features docker needs (`nesting`, `keyctl`), the stack disk, the managed
-volumes, the `compose` tag. The plan adds what is missing and reports what
-differs; it never removes.
+features docker needs (`nesting`, `keyctl`), the managed volumes, the
+`compose` tag. The plan adds what is missing and reports what differs; it
+never removes.
+
+## The stack directory is on the rootfs
+
+`/opt/stack` was a disk of its own for one reason: a disposable rootfs that a
+rebase or migrate could wipe or replace while the stack survived. Neither
+operation exists. What remained was an extra disk per guest, two document
+keys, a config key and a second place for data to live. Now only `x-pve`
+volumes get disks, which is the part that matters (their storage, size and
+backup flag), and plain volumes and `.env` sit on the rootfs, which is backed
+up anyway.
+
+## No guessed storage; ask once, remember
+
+Storage names are per node and `local-lvm` exists only on a stock install, so
+a built-in default was a guess that failed on a real cluster. There is none.
+`new` settles the template storage and the disk storage from a flag, from the
+stored choice, or from a numbered question at the terminal, in that order,
+and offers to store an answer; every question is asked before anything is
+done, so an unanswered one leaves nothing behind. Without a terminal it stops
+and names the `config set` command. The daemon never asks: an `x-pve` disk
+without a storage on a node without a stored one is refused in the plan with
+that command in the message. The stored choices live in
+`/etc/pve/pve-compose.cfg`, written only with what differs from the defaults
+and re-read before every save so two nodes writing it do not clobber each
+other.
 
 ## Volumes: identified by path, grow-only, never deleted
 
@@ -124,14 +149,15 @@ itself.
 
 The `nesting` and `keyctl` features docker needs only take effect when the
 container restarts, and docker cannot start without them. An apply that had to
-set them stops after the pct half with that message; `--reboot` lets it restart
-the guest and continue. The loop never reboots a guest.
+set them stops after the pct half with that message, and says so on the error
+path too. Nothing reboots a guest; `docs/ROADMAP.md` has the open question.
 
 ## Nothing from a document reaches a shell unvalidated
 
-`stack.owner`, every `x-pve.owner` and `stack.project` end up inside `sh -c`
-lines run in the guest. They are validated when the document is parsed
-(`uid:gid`, compose's project-name charset), so a holder of a scoped pve-meta
+`stack.owner` and every `x-pve.owner` end up inside `sh -c` lines run in the
+guest, and the hostname becomes the compose project name. Owners are validated
+when the document is parsed (`uid:gid`), the project name is normalised to
+compose's charset, so a holder of a scoped pve-meta
 token, a lower privilege than the guest's PVE config, cannot turn a document
 into a root shell there. Volume names are checked the same way.
 

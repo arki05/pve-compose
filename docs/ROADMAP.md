@@ -5,7 +5,7 @@ the next attempt starts where the last one stopped. None of these is promised.
 
 ## Migrate: the same stack on a new wrapper
 
-The operation: a new container from the current template, the stack disk and
+The operation: a new container from the current template, the stack directory and
 managed volumes copied over, the pve-meta document copied, the stack up on the
 new one, the old one stopped and kept whole so reverting is "start the old,
 destroy the new". It is what makes the wrapper truly disposable, and it is the
@@ -34,15 +34,16 @@ What a future version must get right:
 * Check the images in the spec exist for the target architecture
   (`docker manifest inspect`) before a cross-arch move.
 
-## `apply --reboot` semantics
+## A restart-pending check before installing docker
 
-Today `--reboot` restarts the guest only when the same apply changed its
-features. A guest whose features were set by an earlier apply and never
-restarted still runs without nesting, and docker cannot start there. The
-accurate test is whether the config PVE generated at the last start
+An apply that sets the features stops and asks for a `pct reboot`. A guest
+whose features were set earlier and never restarted still runs without nesting,
+and docker cannot start there; the tool does not notice and installs docker
+anyway. The accurate test is whether the config PVE generated at the last start
 (`/var/lib/lxc/<vmid>/config`) lacks `lxc.apparmor.allow_nesting = 1` while the
-PVE config asks for nesting. Undecided whether the tool should reboot in that
-case or refuse to install docker until the guest has been restarted.
+PVE config asks for nesting. A flag that reboots in that case was built and
+removed until the check exists; undecided whether the tool should then reboot
+or refuse to install docker until the guest has been restarted.
 
 ## Host binds and unprivileged wrappers
 

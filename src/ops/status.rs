@@ -7,7 +7,6 @@ use crate::doc;
 use crate::ops::{self, apply, Ctx};
 use crate::pct;
 use crate::stack;
-use crate::STACK_DIR;
 
 #[derive(Debug, Serialize)]
 pub struct Row {
@@ -101,10 +100,6 @@ fn row(ctx: &Ctx, l: &pct::Listed, read: Option<doc::Read>, level: Level) -> Row
             "pending"
         }
         .into();
-        return r;
-    }
-    if g.config.mount_at(STACK_DIR).is_none() {
-        r.state = "never".into();
         return r;
     }
     match stack::read_facts(l.vmid) {
@@ -207,6 +202,9 @@ pub fn print_table(rows: &[Row], level: Level) {
             },
             r.policy.as_deref().unwrap_or("-")
         );
+        if let Some(msg) = r.state.strip_prefix("error: ") {
+            println!("        {msg}");
+        }
         if level == Level::Both {
             for c in &r.containers {
                 println!(

@@ -1,17 +1,16 @@
-# /etc/pve/pve-compose.cfg -- cluster-wide, every key optional.
+# /etc/pve/pve-compose.cfg -- cluster-wide, every key optional. Written by
+# `pve-compose config set|unset` and by `new` when you let it store an
+# answer; shown by `pve-compose config`. Editing it by hand works too.
 template:
-  storage: local                 # a storage with vztmpl content, for the base template
-  base: debian-13-standard       # the upstream template new unpacks (pveam downloads it)
+  storage: local                 # a storage with vztmpl content (cluster-wide)
+  base: debian-13-standard       # the upstream template `new` unpacks (pveam downloads it)
 defaults:
-  storage: local-lvm             # stack disk and managed volumes, unless the document says
-  stack_size: 4G
   rootfs_size: 8G
   owner: "1000:1000"
   bridge: vmbr0
   cores: 2
   memory: 2048
-  swap: 0
-nodes:                           # per-node overrides of storage and bridge
+nodes:                           # disk storage is per node: names differ per node
   # StorageCube: { storage: NetApp }
 daemon:
   interval: 30                   # seconds between version-token polls

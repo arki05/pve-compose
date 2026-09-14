@@ -337,9 +337,43 @@ pub fn start(vmid: u32) -> Result<()> {
     cmd::run("pct", &["start", &vmid.to_string()]).map(|_| ())
 }
 
-/// `pct reboot`: the way a changed `features` line takes effect.
-pub fn reboot(vmid: u32) -> Result<()> {
-    cmd::run("pct", &["reboot", &vmid.to_string()]).map(|_| ())
+/// One storage of this node, from `GET /nodes/{node}/storage`.
+#[derive(Debug, Clone)]
+pub struct Storage {
+    pub id: String,
+    pub kind: String,
+    pub avail: u64,
+    pub shared: bool,
+}
+
+/// The enabled, active storages on `node` that accept `content`
+/// (`rootdir` for container disks, `vztmpl` for templates).
+pub fn storages(node: &str, content: &str) -> Result<Vec<Storage>> {
+    let v = cmd::pvesh_get(
+        &format!("/nodes/{node}/storage"),
+        &["--content", content, "--enabled", "1"],
+    )?;
+    let mut out = Vec::new();
+    for r in v.as_array().map(|a| a.iter()).into_iter().flatten() {
+        if r.get("active").and_then(Value::as_u64) == Some(0) {
+            continue;
+        }
+        let Some(id) = r.get("storage").and_then(Value::as_str) else {
+            continue;
+        };
+        out.push(Storage {
+            id: id.to_string(),
+            kind: r
+                .get("type")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string(),
+            avail: r.get("avail").and_then(Value::as_u64).unwrap_or(0),
+            shared: r.get("shared").and_then(Value::as_u64) == Some(1),
+        });
+    }
+    out.sort_by(|a, b| a.id.cmp(&b.id));
+    Ok(out)
 }
 
 /// The node owning `vmid`, from the cluster's own vmid map. `Ok(None)` for a

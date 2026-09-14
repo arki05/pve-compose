@@ -2,8 +2,8 @@
 # Installed to /usr/share/pve-meta/prefixes/compose.yaml; a cluster override
 # lives at /etc/pve/meta.d/prefixes/compose.yaml.
 #
-# Defaults that come from /etc/pve/pve-compose.cfg are described, not
-# declared here, so the two never disagree.
+# Defaults that come from `pve-compose config` are described, not declared
+# here, so the two never disagree.
 description: docker compose stack managed by pve-compose
 selector: { tag: compose }
 schema:
@@ -11,21 +11,11 @@ schema:
   properties:
     stack:
       type: object
-      description: The stack disk, mounted at /opt/stack.
+      description: The stack directory /opt/stack on the rootfs.
       properties:
-        storage:
-          type: string
-          format: pve-storage-id
-          description: Storage for the stack disk and for managed volumes that name none (default from pve-compose.cfg, per node).
-        size:
-          type: string
-          description: Stack disk size, grow-only (default from pve-compose.cfg).
         owner:
           type: string
-          description: uid:gid for volume directories and ${PVE_UID}/${PVE_GID} (default from pve-compose.cfg).
-        project:
-          type: string
-          description: Compose project name (default the guest's hostname).
+          description: uid:gid for volume directories and ${PVE_UID}/${PVE_GID} (default from `pve-compose config`).
     policy:
       type: object
       description: What the daemon does on its own; a hand-run verb always does everything.

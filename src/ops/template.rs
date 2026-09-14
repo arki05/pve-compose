@@ -1,7 +1,7 @@
-//! Which template `new` unpacks: the newest upstream Debian
-//! template on the template storage, downloaded through `pveam` if there is
-//! none yet. Docker is installed afterwards by `provision`, every time, so
-//! there is no docker-ready template to build or keep fresh.
+//! Which template `new` unpacks: the newest upstream Debian template on the
+//! chosen template storage, downloaded through `pveam` if there is none yet.
+//! Docker is installed afterwards by `provision`, every time, so there is no
+//! docker-ready template to build or keep fresh.
 
 use anyhow::{bail, Result};
 use serde_json::Value;
@@ -24,13 +24,12 @@ fn for_arch(name: &str, arch: &str) -> bool {
     name.contains(&format!("_{arch}."))
 }
 
-/// The newest vztmpl on the template storage whose file name starts with
-/// `prefix`, for this node's architecture.
-pub fn newest_vztmpl(ctx: &Ctx, prefix: &str) -> Result<Option<String>> {
-    let st = &ctx.config.template.storage;
+/// The newest vztmpl on `storage` whose file name starts with `prefix`, for
+/// this node's architecture.
+pub fn newest_vztmpl(ctx: &Ctx, storage: &str, prefix: &str) -> Result<Option<String>> {
     let arch = arch()?;
     let v = cmd::pvesh_get(
-        &format!("/nodes/{}/storage/{st}/content", ctx.node),
+        &format!("/nodes/{}/storage/{storage}/content", ctx.node),
         &["--content", "vztmpl"],
     )?;
     let mut names: Vec<String> = v
@@ -52,10 +51,10 @@ pub fn newest_vztmpl(ctx: &Ctx, prefix: &str) -> Result<Option<String>> {
     Ok(names.pop())
 }
 
-/// Downloads the newest upstream template matching the configured base.
-pub fn download_base(ctx: &Ctx) -> Result<String> {
+/// Downloads the newest upstream template matching the configured base to
+/// `storage`.
+pub fn download_base(ctx: &Ctx, storage: &str) -> Result<String> {
     let base = &ctx.config.template.base;
-    let st = &ctx.config.template.storage;
     let arch = arch()?;
     eprintln!("template: fetching the {base} template list");
     cmd::run("pveam", &["update"])?;
@@ -70,31 +69,29 @@ pub fn download_base(ctx: &Ctx) -> Result<String> {
     let Some(name) = names.pop() else {
         bail!("no upstream {arch} template starts with {base}_ (pveam available)");
     };
-    eprintln!("template: downloading {name} to {st}");
-    cmd::stream("pveam", &["download", st, name])?;
-    Ok(format!("{st}:vztmpl/{name}"))
+    eprintln!("template: downloading {name} to {storage}");
+    cmd::stream("pveam", &["download", storage, name])?;
+    Ok(format!("{storage}:vztmpl/{name}"))
 }
 
-/// Resolves the vztmpl volid to use. `explicit` may be a volid or a
-/// file-name prefix on the template storage. With nothing given: the newest
-/// configured base template, downloaded if missing.
-pub fn resolve(ctx: &Ctx, explicit: Option<&str>) -> Result<String> {
+/// Resolves the vztmpl volid to use. `explicit` may be a volid (then
+/// `storage` is not consulted) or a file-name prefix on `storage`. With
+/// nothing given: the newest configured base template on `storage`,
+/// downloaded if missing.
+pub fn resolve(ctx: &Ctx, storage: &str, explicit: Option<&str>) -> Result<String> {
     if let Some(e) = explicit {
         if e.contains(":vztmpl/") {
             return Ok(e.into());
         }
-        if let Some(v) = newest_vztmpl(ctx, e)? {
+        if let Some(v) = newest_vztmpl(ctx, storage, e)? {
             return Ok(v);
         }
-        bail!(
-            "no template on {} starts with {e}",
-            ctx.config.template.storage
-        );
+        bail!("no template on {storage} starts with {e}");
     }
-    if let Some(v) = newest_vztmpl(ctx, &format!("{}_", ctx.config.template.base))? {
+    if let Some(v) = newest_vztmpl(ctx, storage, &format!("{}_", ctx.config.template.base))? {
         return Ok(v);
     }
-    download_base(ctx)
+    download_base(ctx, storage)
 }
 
 #[cfg(test)]

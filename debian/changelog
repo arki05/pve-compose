@@ -1,3 +1,20 @@
+pve-compose (0.0.2-1) trixie; urgency=medium
+
+  * The stack directory lives on the rootfs; there is no stack disk. Only
+    x-pve volumes get disks of their own. `stack.storage`, `stack.size` and
+    `stack.project` are gone from the document (the project is the hostname).
+  * No built-in storage guess. `new` takes the template and disk storages
+    from a flag, the persisted config, or a question at the terminal, and
+    offers to store an answer; every question is asked before anything is
+    done. An x-pve disk without a storage on a node without a stored one is
+    refused with the command that fixes it.
+  * `pve-compose config [set|unset <key> [value]]` shows and changes the
+    persisted choices; the file needs no hand editing.
+  * Removed: `pct template`, `apply --reboot`, `new --stack-size`, the
+    cluster-wide storage default, `nodes.<n>.bridge`, `defaults.swap`.
+
+ -- Julius Arkenberg <julius@rkenberg.de>  Mon, 14 Sep 2026 16:30:00 +0200
+
 pve-compose (0.0.1-1) trixie; urgency=medium
 
   * First version. One docker compose stack per LXC wrapper, described by the

@@ -11,6 +11,7 @@ use crate::pct;
 use crate::stack;
 
 const SCRIPT: &str = r#"set -e
+export LC_ALL=C.UTF-8 LANG=C.UTF-8
 if docker info >/dev/null 2>&1; then echo "docker: present"; exit 0; fi
 if ! command -v apt-get >/dev/null 2>&1; then echo "not a Debian-family guest" >&2; exit 4; fi
 echo "docker: installing from get.docker.com"

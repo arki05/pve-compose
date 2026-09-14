@@ -13,7 +13,7 @@ use anyhow::{bail, Result};
 use clap::{Args, Parser, Subcommand};
 
 use pve_compose::cmd;
-use pve_compose::ops::{self, apply, daemon, diff, new, status, template, upgrade, Ctx};
+use pve_compose::ops::{self, apply, configcmd, daemon, diff, new, status, upgrade, Ctx};
 use pve_compose::pct;
 use pve_compose::size::Size;
 use pve_compose::stack;
@@ -44,6 +44,11 @@ enum Cmd {
     Upgrade(UpgradeArgs),
     /// A new wrapper from the template with an empty document.
     New(Box<NewArgs>),
+    /// Persisted choices: show, set or unset one (storage is per node).
+    Config {
+        #[command(subcommand)]
+        cmd: Option<ConfigCmd>,
+    },
     /// The wrapper, through PVE.
     Pct {
         #[command(subcommand)]
@@ -64,8 +69,20 @@ enum PctCmd {
     Apply(ApplyArgs),
     Diff(Vmid),
     Status(StatusArgs),
-    /// Print the template `new` unpacks, downloading it if missing.
-    Template,
+}
+
+#[derive(Subcommand)]
+enum ConfigCmd {
+    /// Set a key; storage applies to this node, the rest to the cluster.
+    Set {
+        #[arg(
+            help = "storage, template-storage, template-base, owner, bridge, cores, memory, rootfs-size"
+        )]
+        key: String,
+        value: String,
+    },
+    /// Back to the default (storage: unset for this node).
+    Unset { key: String },
 }
 
 #[derive(Subcommand)]
@@ -89,9 +106,6 @@ struct Vmid {
 #[derive(Args)]
 struct ApplyArgs {
     vmid: u32,
-    /// Reboot the guest if its features changed, then continue.
-    #[arg(long)]
-    reboot: bool,
     /// Render and push the compose file, but do not `compose up`.
     #[arg(long)]
     no_up: bool,
@@ -101,7 +115,6 @@ impl ApplyArgs {
     fn options(&self) -> apply::Options {
         apply::Options {
             pull: false,
-            reboot: self.reboot,
             no_up: self.no_up,
             only_if_up: false,
         }
@@ -111,16 +124,12 @@ impl ApplyArgs {
 #[derive(Args)]
 struct UpgradeArgs {
     vmid: u32,
-    /// Reboot the guest if its features changed, then continue.
-    #[arg(long)]
-    reboot: bool,
 }
 
 impl UpgradeArgs {
     fn options(&self) -> apply::Options {
         apply::Options {
             pull: true,
-            reboot: self.reboot,
             no_up: false,
             only_if_up: false,
         }
@@ -142,13 +151,11 @@ struct NewArgs {
     name: String,
     #[arg(long)]
     template: Option<String>,
-    /// Storage for the rootfs and the stack disk (default: the node's configured storage).
+    /// Storage for the rootfs (default: this node's stored choice, else asked).
     #[arg(long)]
     storage: Option<String>,
     #[arg(long)]
     rootfs_size: Option<Size>,
-    #[arg(long)]
-    stack_size: Option<Size>,
     #[arg(long)]
     bridge: Option<String>,
     /// `dhcp` or a CIDR.
@@ -185,12 +192,11 @@ fn target(cmd: &Cmd) -> Option<u32> {
         Cmd::Upgrade(u) => Some(u.vmid),
         Cmd::Diff(v) => Some(v.vmid),
         Cmd::Status(s) => s.vmid,
-        Cmd::New(_) | Cmd::Daemon => None,
+        Cmd::New(_) | Cmd::Daemon | Cmd::Config { .. } => None,
         Cmd::Pct { cmd } => match cmd {
             PctCmd::Apply(a) => Some(a.vmid),
             PctCmd::Diff(v) => Some(v.vmid),
             PctCmd::Status(s) => s.vmid,
-            PctCmd::Template => None,
         },
         Cmd::Docker { cmd } => match cmd {
             DockerCmd::Apply(a) => Some(a.vmid),
@@ -260,7 +266,6 @@ fn run(cli: Cli) -> Result<()> {
                 template: a.template,
                 storage: a.storage,
                 rootfs_size: a.rootfs_size,
-                stack_size: a.stack_size,
                 bridge: a.bridge,
                 ip: a.ip,
                 gateway: a.gateway,
@@ -269,15 +274,16 @@ fn run(cli: Cli) -> Result<()> {
                 no_up: a.no_up,
             },
         ),
-        Cmd::Daemon => daemon::run(&ctx),
+        Cmd::Daemon => daemon::run(ctx),
+        Cmd::Config { cmd } => match cmd {
+            None => configcmd::show(&ctx),
+            Some(ConfigCmd::Set { key, value }) => configcmd::set(&ctx, &key, &value),
+            Some(ConfigCmd::Unset { key }) => configcmd::unset(&ctx, &key),
+        },
         Cmd::Pct { cmd } => match cmd {
-            PctCmd::Apply(a) => apply::pct_apply(&ctx, a.vmid, a.options()).map(|_| ()),
+            PctCmd::Apply(a) => apply::pct_apply(&ctx, a.vmid).map(|_| ()),
             PctCmd::Diff(v) => diff::pct_diff(&ctx, v.vmid),
             PctCmd::Status(s) => show_status(&ctx, s, status::Level::Pct),
-            PctCmd::Template => {
-                println!("{}", template::resolve(&ctx, None)?);
-                Ok(())
-            }
         },
         Cmd::Docker { cmd } => match cmd {
             DockerCmd::Apply(a) => apply::docker_apply(&ctx, a.vmid, a.options()),

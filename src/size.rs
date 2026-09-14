@@ -8,7 +8,7 @@ use std::fmt;
 use std::str::FromStr;
 
 use anyhow::{bail, Result};
-use serde::{Deserialize, Deserializer};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Size(pub u64);
@@ -38,6 +38,17 @@ impl Size {
     /// The size as `pct resize` wants it: an absolute size with a unit.
     pub fn to_pct_resize(self) -> String {
         self.to_string()
+    }
+
+    /// For a human: the largest unit that fits, one decimal (`14.2G`).
+    pub fn human(self) -> String {
+        let b = self.0 as f64;
+        for (unit, div) in [("T", TIB), ("G", GIB), ("M", MIB), ("K", KIB)] {
+            if b >= div as f64 {
+                return format!("{:.1}{unit}", b / div as f64);
+            }
+        }
+        format!("{}", self.0)
     }
 }
 
@@ -91,6 +102,12 @@ impl FromStr for Size {
     }
 }
 
+impl Serialize for Size {
+    fn serialize<S: Serializer>(&self, s: S) -> std::result::Result<S::Ok, S::Error> {
+        s.serialize_str(&self.to_string())
+    }
+}
+
 impl<'de> Deserialize<'de> for Size {
     fn deserialize<D: Deserializer<'de>>(d: D) -> std::result::Result<Self, D::Error> {
         // A YAML `20G` is a string; a bare `20` may arrive as a number.
@@ -117,5 +134,7 @@ mod tests {
         assert_eq!("512M".parse::<Size>().unwrap().to_pct_gib(), "0.5");
         assert_eq!("1.5G".parse::<Size>().unwrap().to_string(), "1536M");
         assert!("x".parse::<Size>().is_err());
+        assert_eq!(Size(14910224 * 1024).human(), "14.2G");
+        assert_eq!(Size(512).human(), "512");
     }
 }
