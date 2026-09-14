@@ -193,22 +193,25 @@ There is no migrate verb (see the roadmap). To move a stack onto a fresh
 wrapper, or to another storage:
 
 ```sh
-pve-compose new <new> --name <host> --no-up [--storage S]   # wrapper, disks, docker, compose.yaml; nothing started
+pve-compose new <new> --name <host> --no-up [--storage S]   # wrapper, stack disk, docker; nothing started
 pve-meta get <old> --format yaml > doc.yaml                  # the whole document, every prefix
 pve-meta set <new> --file doc.yaml
+pve-compose pct apply <new>                                  # the real document's volume disks, hotplugged
 pve-compose docker down <old>; pct stop <old>
-# copy the data: /opt/stack (minus volumes/) and each volumes/<name>, old to new, with both stopped
+pct stop <new>
 pct mount <old>; pct mount <new>
 cp -a --reflink=auto /var/lib/lxc/<old>/rootfs/opt/stack/. /var/lib/lxc/<new>/rootfs/opt/stack/
 pct unmount <new>; pct unmount <old>
+pct start <new>
 pve-compose docker apply <new>
-pct set <old> --onboot 0 --tags ""                           # keep it stopped and out of the loop
+pct set <old> --onboot 0 --delete tags                       # keep it stopped and out of the loop
 ```
 
 `pct mount` mounts the data volumes under the rootfs, so one `cp` of
-`/opt/stack` covers the stack disk and every managed volume; `--reflink=auto`
-is free on btrfs and on ZFS pools with block cloning. Do not run both guests
-against the same host binds.
+`/opt/stack` covers the stack disk and every managed volume, provided
+`pct apply` created them on the new guest first; `--reflink=auto` is free on
+btrfs and on ZFS pools with block cloning. Both guests stopped for the copy.
+Do not run both guests against the same host binds.
 
 ## Templates
 
@@ -239,8 +242,24 @@ make deb        # dpkg-buildpackage on a Debian 13 host with a Rust toolchain
 ```
 
 Version: `Cargo.toml` and the upstream part of `debian/changelog`'s top entry
-must match (the package build checks). To release: bump `Cargo.toml`, add a
-`debian/changelog` entry (`dch -v 0.2.0-1`) describing the changes, commit, tag
-`v0.2.0`. `debian/changelog` is the changelog; there is no other.
+must match (the package build checks). `debian/changelog` is the changelog;
+there is no other.
+
+Releasing, the same way as pve-meta and pve-meta-traefik:
+
+1. Bump `version` in `Cargo.toml` (and `Cargo.lock`), add a `debian/changelog`
+   entry with the same upstream version (`dch -v 0.2.0-1`), commit.
+2. `git tag v0.2.0 && git push origin main v0.2.0`.
+3. `.github/workflows/build.yml` builds and tests on amd64 and arm64 in a
+   `debian:trixie` container on every push; on a `v*` tag it checks the tag
+   against the changelog, publishes the `.deb`s as a GitHub Release (a file
+   name already published is never uploaded again), and asks
+   `apt.arki05.com` to index them if the `APT_REPO_DISPATCH_TOKEN` secret is
+   set, otherwise its nightly run picks them up. That repository lists
+   `arki05/pve-compose` in its `packages.txt`.
+4. On the nodes: `apt update && apt install pve-compose`.
+
+`.github/workflows/audit.yml` runs `cargo audit` against the lock file weekly
+and on dependency changes.
 
 AGPL-3.0-or-later.

@@ -67,5 +67,5 @@ rollback would re-fire it.
   rows and validation in the editor. In the PVE::JSONSchema dialect already;
   pve-meta's core walks `properties` only.
 * Dots in map keys, addressed in slash form, so `driver_opts` maps are storable.
-* Documents in guest backups, so a restored guest has its document. Coming in
-  pve-meta; until then a restore needs the document written again.
+* Documents in guest backups: done in pve-meta 0.1.2. A guest restored on a
+  node with that version has its document; the tool does not depend on it.
