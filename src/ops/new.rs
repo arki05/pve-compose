@@ -1,5 +1,5 @@
-//! `new`: a wrapper from the template, tagged, with a hello-world document,
-//! started and applied.
+//! `new`: a wrapper from the template, tagged, with an empty document,
+//! started, docker installed, applied. The stack is yours to write.
 
 use anyhow::{bail, Result};
 
@@ -79,15 +79,14 @@ pub struct NewArgs {
     pub gateway: Option<String>,
     pub cores: Option<u32>,
     pub memory: Option<u64>,
-    pub route: Option<String>,
     pub no_up: bool,
 }
 
-/// The document a fresh wrapper gets: a whoami container on port 8080, so
-/// the whole chain is testable with one curl. Only what was given explicitly
-/// is written under `stack`, so the document stays portable across nodes
-/// with different storage names.
-pub fn hello_world(a: &NewArgs) -> String {
+/// The document a fresh wrapper gets: the default policy and an empty
+/// `spec`, nothing to run until you write the stack. Only what was given
+/// explicitly is written under `stack`, so the document stays portable
+/// across nodes with different storage names.
+pub fn initial_document(a: &NewArgs) -> String {
     let mut s = String::new();
     if a.storage.is_some() || a.stack_size.is_some() {
         s.push_str("stack:\n");
@@ -98,10 +97,7 @@ pub fn hello_world(a: &NewArgs) -> String {
             s.push_str(&format!("  size: {sz}\n"));
         }
     }
-    s.push_str(
-        "policy:\n  pct: auto\n  docker: auto\n  pull: manual\n\
-         spec:\n  services:\n    hello:\n      image: traefik/whoami\n      restart: unless-stopped\n      ports:\n        - \"8080:80\"\n      environment:\n        WHOAMI_NAME: ${PVE_NAME}\n",
-    );
+    s.push_str("policy:\n  pct: auto\n  docker: auto\n  pull: manual\nspec:\n  services: {}\n");
     s
 }
 
@@ -142,10 +138,7 @@ pub fn new(ctx: &Ctx, a: &NewArgs) -> Result<()> {
     eprintln!("new: creating {vmid} ({}) from {template}", a.name);
     create_wrapper(&w)?;
 
-    doc::write(vmid, &hello_world(a))?;
-    if let Some(host) = &a.route {
-        write_route(vmid, &a.name, host)?;
-    }
+    doc::write(vmid, &initial_document(a))?;
     eprintln!("new: document written");
 
     // Hold the lock from the start, so the daemon's first pass waits for
@@ -169,21 +162,9 @@ pub fn new(ctx: &Ctx, a: &NewArgs) -> Result<()> {
             ..stack::read_facts(vmid)?.unwrap_or_default()
         },
     )?;
-    if a.no_up {
-        eprintln!("new: done; put the data under /opt/stack/volumes/ and your .env in /opt/stack/, then `pve-compose docker apply {vmid}`");
-    } else {
-        eprintln!(
-            "new: done; the hello-world answers on port 8080 of {}",
-            a.name
-        );
-    }
-    ops::require_running(ctx, vmid)
-}
-
-/// A `traefik` subtree routing `host` to the hello-world's port 8080.
-fn write_route(vmid: u32, name: &str, host: &str) -> Result<()> {
-    let route = format!(
-        "http:\n  routers:\n    {name}:\n      rule: Host(`{host}`)\n      entryPoints: [websecure]\n      tls: {{ certResolver: default }}\n      service: {name}\n  services:\n    {name}:\n      loadBalancer:\n        servers: [{{ port: 8080 }}]\n"
+    eprintln!(
+        "new: done; write the stack into {vmid}'s `compose.spec` (Metadata tab, or pve-meta set {vmid} compose.spec), data under /opt/stack/volumes/, secrets in /opt/stack/.env{}",
+        if a.no_up { ", then `pve-compose docker apply {vmid}`" } else { "" }
     );
-    doc::write_prefix(vmid, "traefik", &route)
+    ops::require_running(ctx, vmid)
 }

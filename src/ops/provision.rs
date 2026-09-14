@@ -20,6 +20,9 @@ apt-get install -y -qq curl ca-certificates >/dev/null
 curl -fsSL https://get.docker.com | sh
 systemctl enable --now docker >/dev/null 2>&1 || true
 docker info >/dev/null 2>&1
+echo "docker: smoke test"
+docker run --rm hello-world >/dev/null
+docker image rm hello-world >/dev/null 2>&1 || true
 "#;
 
 /// Installs docker in the guest if it is not there. Output on the terminal.

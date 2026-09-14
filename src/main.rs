@@ -42,7 +42,7 @@ enum Cmd {
     Status(StatusArgs),
     /// Pull newer images, then apply both levels.
     Upgrade(UpgradeArgs),
-    /// A new wrapper from the template with a hello-world document.
+    /// A new wrapper from the template with an empty document.
     New(Box<NewArgs>),
     /// The wrapper, through PVE.
     Pct {
@@ -161,9 +161,6 @@ struct NewArgs {
     /// MiB.
     #[arg(long)]
     memory: Option<u64>,
-    /// Also write a `traefik` subtree routing this host name to the hello-world.
-    #[arg(long)]
-    route: Option<String>,
     /// Set everything up but do not `compose up`: for migrating data in first.
     #[arg(long)]
     no_up: bool,
@@ -269,7 +266,6 @@ fn run(cli: Cli) -> Result<()> {
                 gateway: a.gateway,
                 cores: a.cores,
                 memory: a.memory,
-                route: a.route,
                 no_up: a.no_up,
             },
         ),

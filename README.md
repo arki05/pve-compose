@@ -77,7 +77,7 @@ started), and the prefix file `/usr/share/pve-meta/prefixes/compose.yaml`.
 ```sh
 pve-compose new <vmid> --name <host> [--storage S] [--ip dhcp|CIDR] [--gateway G]
                        [--bridge B] [--cores N] [--memory MiB] [--rootfs-size 8G]
-                       [--stack-size 4G] [--template T] [--route host.example] [--no-up]
+                       [--stack-size 4G] [--template T] [--no-up]
 pve-compose status [<vmid>] [--json]
 pve-compose diff <vmid>
 pve-compose apply <vmid> [--reboot] [--no-up]
@@ -91,11 +91,13 @@ pve-compose daemon                                     # what the unit runs
 ```
 
 * `new` creates an unprivileged wrapper from the template, tags it, writes a
-  hello-world document (whoami on port 8080; `--route` also writes a `traefik`
-  subtree for it), starts it, installs docker, applies. `--no-up` stops before
-  `compose up`: put data under `/opt/stack/volumes/` and your `.env` in
-  `/opt/stack/`, then `pve-compose docker apply <vmid>`. Only `--storage` and
-  `--stack-size` are written into the document; everything else is PVE config.
+  document with the default policy and an empty `spec`, starts it, installs
+  docker (with a one-off `hello-world` run as the smoke test), applies. Then
+  write the stack into `compose.spec`, put data under `/opt/stack/volumes/`
+  and secrets in `/opt/stack/.env`. With no services in the document nothing
+  is started; `--no-up` keeps it that way after you add some, until a
+  `pve-compose docker apply <vmid>`. Only `--storage` and `--stack-size` are
+  written into the document; everything else is PVE config.
 * `apply` on a guest whose features had to be set stops after the pct half:
   features take effect on restart. `--reboot` restarts it and continues.
   `--no-up` renders and pushes the file without starting the stack.

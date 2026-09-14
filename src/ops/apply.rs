@@ -148,7 +148,15 @@ pub fn docker_apply_guest(ctx: &Ctx, g: &Guest, o: Options) -> Result<bool> {
     let current = stack::read_compose(vmid)?;
     // Up means: a compose file was there and one of its containers runs.
     // Decided before the file is rewritten, since `ps` reads the file.
-    let start = if o.no_up {
+    let has_services = g
+        .read
+        .doc
+        .spec
+        .get("services")
+        .and_then(|v| v.as_mapping())
+        .map(|m| !m.is_empty())
+        .unwrap_or(false);
+    let start = if o.no_up || !has_services {
         false
     } else if o.only_if_up {
         current.is_some() && stack::ps(vmid)?.iter().any(|c| c.state == "running")
@@ -166,6 +174,8 @@ pub fn docker_apply_guest(ctx: &Ctx, g: &Guest, o: Options) -> Result<bool> {
         }
         eprintln!("docker: up");
         stack::up(vmid)?;
+    } else if !has_services {
+        eprintln!("docker: file written; no services in the document, nothing to start");
     } else {
         eprintln!("docker: file written, stack not started; `pve-compose docker apply {vmid}` brings it up");
     }
