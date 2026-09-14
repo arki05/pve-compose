@@ -31,19 +31,14 @@ never removes.
 
 ## The stack directory is on the rootfs
 
-`/opt/stack` was a disk of its own for one reason: a disposable rootfs that a
-rebase or migrate could wipe or replace while the stack survived. Neither
-operation exists. What remained was an extra disk per guest, two document
-keys, a config key and a second place for data to live. Now only `x-pve`
-volumes get disks, which is the part that matters (their storage, size and
-backup flag), and plain volumes and `.env` sit on the rootfs, which is backed
-up anyway.
+`/opt/stack` is a directory on the rootfs. Only `x-pve` volumes get disks of
+their own, with a storage, a size and a backup flag; plain volumes, the
+rendered file and `.env` sit on the rootfs, which is backed up with the guest.
+One disk per thing that needs one, and nothing else.
 
 ## No guessed storage; ask once, remember
 
-Storage names are per node and `local-lvm` exists only on a stock install, so
-a built-in default was a guess that failed on a real cluster. There is none.
-`new` settles the template storage and the disk storage from a flag, from the
+Storage names are per node, so there is no built-in default. `new` settles the template storage and the disk storage from a flag, from the
 stored choice, or from a numbered question at the terminal, in that order,
 and offers to store an answer; every question is asked before anything is
 done, so an unanswered one leaves nothing behind. Without a terminal it stops
