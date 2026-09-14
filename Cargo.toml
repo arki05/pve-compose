@@ -1,0 +1,32 @@
+[package]
+name = "pve-compose"
+description = "docker compose stacks in LXC wrappers, driven by pve-meta documents"
+version = "0.0.1"
+edition = "2021"
+license = "AGPL-3.0-or-later"
+authors = ["Julius Arkenberg <julius@rkenberg.de>"]
+repository = "https://github.com/arki05/pve-compose"
+
+[lib]
+name = "pve_compose"
+path = "src/lib.rs"
+
+[[bin]]
+name = "pve-compose"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+hex = "0.4"
+libc = "0.2"
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+serde_yaml_ng = "0.10"
+sha2 = "0.10"
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true

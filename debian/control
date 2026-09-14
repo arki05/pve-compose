@@ -1,0 +1,16 @@
+Source: pve-compose
+Section: admin
+Priority: optional
+Maintainer: Julius Arkenberg <julius@rkenberg.de>
+Build-Depends: debhelper-compat (= 13), cargo, rustc
+Standards-Version: 4.6.2
+Homepage: https://github.com/arki05/pve-compose
+
+Package: pve-compose
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}, pve-meta, pve-container, zstd
+Description: docker compose stacks in LXC wrappers, driven by pve-meta documents
+ Each managed container carries its compose document in its pve-meta
+ metadata. pve-compose renders it into the container, turns named volumes
+ into PVE mountpoint disks or host binds, brings the stack up, and keeps
+ doing so from a per-node reconcile loop.

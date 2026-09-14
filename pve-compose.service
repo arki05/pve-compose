@@ -1,0 +1,15 @@
+[Unit]
+Description=pve-compose reconcile loop
+Documentation=https://github.com/arki05/pve-compose
+After=pve-cluster.service pvedaemon.service
+Requires=pve-cluster.service
+
+[Service]
+Type=simple
+Environment=LANG=C.UTF-8 LC_ALL=C.UTF-8
+ExecStart=/usr/sbin/pve-compose daemon
+Restart=on-failure
+RestartSec=10s
+
+[Install]
+WantedBy=multi-user.target

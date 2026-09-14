@@ -1,0 +1,18 @@
+# /etc/pve/pve-compose.cfg -- cluster-wide, every key optional.
+template:
+  storage: local                 # a storage with vztmpl content, for the base template
+  base: debian-13-standard       # the upstream template new unpacks (pveam downloads it)
+defaults:
+  storage: local-lvm             # stack disk and managed volumes, unless the document says
+  stack_size: 4G
+  rootfs_size: 8G
+  owner: "1000:1000"
+  bridge: vmbr0
+  cores: 2
+  memory: 2048
+  swap: 0
+nodes:                           # per-node overrides of storage and bridge
+  # StorageCube: { storage: NetApp }
+daemon:
+  interval: 30                   # seconds between version-token polls
+  full_every: 600                # seconds between unconditional passes

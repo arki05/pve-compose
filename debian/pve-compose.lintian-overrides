@@ -1,0 +1,2 @@
+# Stripped, statically linked Rust binary; no shared-library dependencies to declare.
+pve-compose: statically-linked-binary

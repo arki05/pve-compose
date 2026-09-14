@@ -1,0 +1,18 @@
+pve-compose (0.0.1-1) trixie; urgency=medium
+
+  * First version. One docker compose stack per LXC wrapper, described by the
+    `compose` subtree of the guest's pve-meta document.
+  * Verbs: new, apply, diff, status, upgrade; `pct` and `docker` halves of each;
+    unknown `docker` verbs pass through to docker compose in /opt/stack.
+  * No migrate verb: moving a stack to a new wrapper is a documented manual
+    recipe (README, "Migrating a stack by hand"; docs/ROADMAP.md).
+  * Per-node reconcile loop (systemd unit) driven by pve-meta's version token;
+    applies document changes to running stacks, never starts a stack.
+  * Named compose volumes become PVE mountpoint disks or host binds via x-pve,
+    identified by mount path, grow-only, never deleted.
+  * Docker installed from get.docker.com into the upstream Debian template;
+    no prebuilt template.
+  * Ships the `compose` pve-meta prefix; the selector's tag is the tag it
+    watches.
+
+ -- Julius Arkenberg <julius@rkenberg.de>  Mon, 14 Sep 2026 12:00:00 +0200
