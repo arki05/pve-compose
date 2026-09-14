@@ -152,8 +152,8 @@ pub fn new(ctx: &Ctx, a: &NewArgs) -> Result<()> {
     // `new` to finish instead of racing it to the first apply.
     let _lock = crate::lock::GuestLock::take(vmid, 60)?;
     pct::start(vmid)?;
-    let ip = pct::wait_ready(vmid, 90)?;
-    eprintln!("new: {vmid} is up at {ip}");
+    pct::wait_ready(vmid, 90)?;
+    eprintln!("new: {vmid} is up");
     apply::apply_locked(
         ctx,
         vmid,
@@ -172,7 +172,10 @@ pub fn new(ctx: &Ctx, a: &NewArgs) -> Result<()> {
     if a.no_up {
         eprintln!("new: done; put the data under /opt/stack/volumes/ and your .env in /opt/stack/, then `pve-compose docker apply {vmid}`");
     } else {
-        eprintln!("new: done; try  curl http://{ip}:8080/");
+        eprintln!(
+            "new: done; the hello-world answers on port 8080 of {}",
+            a.name
+        );
     }
     ops::require_running(ctx, vmid)
 }

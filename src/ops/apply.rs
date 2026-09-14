@@ -98,7 +98,6 @@ pub fn vars(ctx: &Ctx, g: &Guest) -> Result<Vars> {
     let (uid, gid) = spec::split_owner(&g.owner(ctx))?;
     Ok(Vars {
         vmid: g.vmid(),
-        ip: pct::ipv4(g.vmid())?.unwrap_or_default(),
         uid,
         gid,
         name: g.config.hostname.clone().unwrap_or_default(),

@@ -333,24 +333,6 @@ pub fn write_file(vmid: u32, path: &str, content: &str, perms: &str) -> Result<(
     res.map(|_| ())
 }
 
-/// The guest's first global IPv4 address on eth0, if it has one.
-pub fn ipv4(vmid: u32) -> Result<Option<String>> {
-    let out = exec_status(
-        vmid,
-        "ip -4 -o addr show scope global 2>/dev/null | awk '{print $4}' | head -n1",
-    )?;
-    if out.status != 0 {
-        return Ok(None);
-    }
-    Ok(out
-        .stdout
-        .trim()
-        .split('/')
-        .next()
-        .filter(|s| !s.is_empty())
-        .map(String::from))
-}
-
 pub fn start(vmid: u32) -> Result<()> {
     cmd::run("pct", &["start", &vmid.to_string()]).map(|_| ())
 }
@@ -381,16 +363,19 @@ pub fn owner_node(vmid: u32) -> Result<Option<(String, String)>> {
     Ok(Some((node, kind)))
 }
 
-/// Waits until the guest answers `pct exec` and has a global IPv4 address,
-/// for up to `secs` seconds. Returns the address.
-pub fn wait_ready(vmid: u32, secs: u32) -> Result<String> {
+/// Waits until the guest answers `pct exec` and has a default route, for up
+/// to `secs` seconds: the signal that apt and docker pulls can run. The
+/// address itself is nobody's business here.
+pub fn wait_ready(vmid: u32, secs: u32) -> Result<()> {
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(secs as u64);
     loop {
-        if let Ok(Some(ip)) = ipv4(vmid) {
-            return Ok(ip);
+        if let Ok(out) = exec_status(vmid, "ip route show default 2>/dev/null | grep -q .") {
+            if out.status == 0 {
+                return Ok(());
+            }
         }
         if std::time::Instant::now() >= deadline {
-            bail!("guest {vmid}: no network after {secs}s");
+            bail!("guest {vmid}: no default route after {secs}s");
         }
         std::thread::sleep(std::time::Duration::from_secs(2));
     }

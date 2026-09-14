@@ -122,10 +122,11 @@ pve-compose daemon                                     # what the unit runs
 
 `spec`: the compose document, with:
 
-* `${PVE_VMID}`, `${PVE_IP}`, `${PVE_NAME}` (hostname), `${PVE_UID}`, `${PVE_GID}`,
-  `${PVE_STACK}` (`/opt/stack`) substituted at render time. `PVE_IP` is the
-  address at that moment; apply again after changing it. Every other `${VAR}` is
-  compose's, from `/opt/stack/.env`.
+* `${PVE_VMID}`, `${PVE_NAME}` (hostname), `${PVE_UID}`, `${PVE_GID}` and
+  `${PVE_STACK}` (`/opt/stack`) substituted at render time, so the rendered
+  file is a function of the document and the config alone. Every other
+  `${VAR}` is compose's, from `/opt/stack/.env`; an app that needs the guest's
+  own address gets it there.
 * a top-level `name:` set to the project, so a plain `docker compose` in
   `/opt/stack` is the same stack.
 * named volumes: every one becomes `/opt/stack/volumes/<name>` and is bound

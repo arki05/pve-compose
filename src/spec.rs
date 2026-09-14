@@ -11,7 +11,7 @@
 //! * `external: true` -- left alone entirely.
 //!
 //! Rendering replaces each managed volume's definition with a bind to that
-//! directory, drops `x-pve`, and substitutes `${PVE_VMID}`, `${PVE_IP}`,
+//! directory, drops `x-pve`, and substitutes `${PVE_VMID}`,
 //! `${PVE_UID}`, `${PVE_GID}`, `${PVE_STACK}` and `${PVE_NAME}` in every
 //! string. Nothing else is touched: the rendered file is the document with
 //! those edits, and it runs with a plain `docker compose up -d` in
@@ -149,7 +149,6 @@ pub fn volumes(spec: &Value) -> Result<Vec<Volume>> {
 #[derive(Debug, Clone, Default)]
 pub struct Vars {
     pub vmid: u32,
-    pub ip: String,
     pub uid: String,
     pub gid: String,
     pub name: String,
@@ -162,7 +161,6 @@ impl Vars {
     fn map(&self) -> BTreeMap<&'static str, String> {
         let mut m = BTreeMap::new();
         m.insert("PVE_VMID", self.vmid.to_string());
-        m.insert("PVE_IP", self.ip.clone());
         m.insert("PVE_UID", self.uid.clone());
         m.insert("PVE_GID", self.gid.clone());
         m.insert("PVE_NAME", self.name.clone());
@@ -319,7 +317,6 @@ volumes:
         let v = volumes(&spec).unwrap();
         let vars = Vars {
             vmid: 105,
-            ip: "10.0.0.5".into(),
             uid: "1000".into(),
             gid: "1000".into(),
             name: "wiki".into(),
