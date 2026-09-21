@@ -310,28 +310,9 @@ pub fn read_file(vmid: u32, path: &str) -> Result<Option<String>> {
     }
 }
 
-/// Writes a file inside the guest with `pct push`, parent directories made
-/// first. `perms` is octal text (`0644`).
-pub fn write_file(vmid: u32, path: &str, content: &str, perms: &str) -> Result<()> {
-    let parent = std::path::Path::new(path)
-        .parent()
-        .map(|p| p.to_string_lossy().into_owned())
-        .unwrap_or_else(|| "/".into());
-    exec(vmid, &format!("mkdir -p '{parent}'"))?;
-    let tmp = std::env::temp_dir().join(format!(
-        "pve-compose-push-{vmid}-{}-{}",
-        std::process::id(),
-        path.replace('/', "_")
-    ));
-    std::fs::write(&tmp, content).with_context(|| format!("cannot write {}", tmp.display()))?;
-    let vm = vmid.to_string();
-    let res = cmd::run(
-        "pct",
-        &["push", &vm, &tmp.to_string_lossy(), path, "--perms", perms],
-    );
-    let _ = std::fs::remove_file(&tmp);
-    res.map(|_| ())
-}
+/// File writes inside the guest go through the guest-files library
+/// (`stack::write_managed`): validated paths, atomic rename and manifest
+/// tracking, not a bare `pct push`.
 
 pub fn start(vmid: u32) -> Result<()> {
     cmd::run("pct", &["start", &vmid.to_string()]).map(|_| ())

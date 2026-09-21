@@ -1,3 +1,12 @@
+pve-compose (0.0.3-1) trixie; urgency=medium
+
+  * The compose file and the facts file inside the guest go through the
+    guest-files library (manifest-tracked, atomic, refused by name when
+    another writer recorded the path) instead of a bare pct push.
+    Comment-key stripping is gone with it: the server strips notes.
+
+ -- Julius Arkenberg <julius@rkenberg.de>  Mon, 21 Sep 2026 19:45:00 +0200
+
 pve-compose (0.0.2-1) trixie; urgency=medium
 
   * The stack directory lives on the rootfs; there is no stack disk. Only
