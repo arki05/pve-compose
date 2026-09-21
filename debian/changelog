@@ -1,3 +1,13 @@
+pve-compose (0.0.5-1) trixie; urgency=medium
+
+  * New policy key `up` (default `manual`): the loop renders and pushes
+    the file but only `compose up`s with `up: auto` (still only if the
+    stack is already up). Documents without the key stage instead of
+    starting; hand-run `apply` always ups unless `--no-up`. Set `up: auto`
+    on a guest to keep the old converge-on-change behaviour.
+
+ -- Julius Arkenberg <julius@rkenberg.de>  Tue, 22 Sep 2026 00:20:00 +0200
+
 pve-compose (0.0.4-1) trixie; urgency=medium
 
   * CI lint fixes only (rustfmt, one doc-comment newline newer clippy
