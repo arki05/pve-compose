@@ -131,6 +131,7 @@ fn pass(ctx: &Ctx, memo: &mut HashMap<u32, Memo>) -> Result<()> {
                     &g,
                     apply::Options {
                         pull: policy.pull == Mode::Auto,
+                        no_up: policy.up == Mode::Manual,
                         only_if_up: true,
                         ..Default::default()
                     },
@@ -139,6 +140,8 @@ fn pass(ctx: &Ctx, memo: &mut HashMap<u32, Memo>) -> Result<()> {
                     "{vmid}: docker {} {}",
                     if started {
                         "applied"
+                    } else if policy.up == Mode::Manual {
+                        "rendered (up is manual, not started)"
                     } else {
                         "rendered (stack is down, not started)"
                     },

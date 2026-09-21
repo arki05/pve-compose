@@ -14,7 +14,7 @@ A guest tagged `compose` with a document like this:
 
 ```yaml
 # pve-meta document of CT 105, subtree `compose`
-policy: { pct: auto, docker: auto, pull: manual }
+policy: { pct: auto, docker: auto, up: manual, pull: manual }
 spec:
   services:
     app:
@@ -120,7 +120,8 @@ pve-compose daemon                                     # what the unit runs
 | key | values | default | meaning |
 |---|---|---|---|
 | `pct` | `auto` `manual` | `auto` | reconcile disks, features, tag on document change |
-| `docker` | `auto` `manual` | `auto` | render and push the file; `compose up` only if the stack is already up |
+| `docker` | `auto` `manual` | `auto` | render and push the file on document change |
+| `up` | `auto` `manual` | `manual` | `compose up` on document change, only if the stack is already up; a hand-run `apply` always ups unless `--no-up` |
 | `pull` | `auto` `manual` | `manual` | `compose pull` before the loop's `up` |
 
 `spec`: the compose document, with:

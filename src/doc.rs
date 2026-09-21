@@ -65,6 +65,12 @@ pub struct Policy {
     pub docker: Mode,
     #[serde(default = "manual")]
     pub pull: Mode,
+    /// Whether the loop `compose up`s on a document change. `manual` (the
+    /// default) stages the file and leaves starting to a human; `auto`
+    /// starts when the stack is already up, never resurrecting a stopped one.
+    /// Hand-run verbs ignore this: typing `apply` is consent.
+    #[serde(default = "manual")]
+    pub up: Mode,
 }
 
 fn auto() -> Mode {
@@ -80,6 +86,7 @@ impl Default for Policy {
             pct: Mode::Auto,
             docker: Mode::Auto,
             pull: Mode::Manual,
+            up: Mode::Manual,
         }
     }
 }
@@ -232,6 +239,7 @@ mod tests {
         assert_eq!(d.policy.pct, Mode::Auto);
         assert_eq!(d.policy.docker, Mode::Auto);
         assert_eq!(d.policy.pull, Mode::Manual);
+        assert_eq!(d.policy.up, Mode::Manual);
         assert!(d.stack.owner.is_none());
     }
 
@@ -247,9 +255,10 @@ mod tests {
 
     #[test]
     fn policy_keys() {
-        let d = parse("policy: { docker: manual }\nspec: {}\n").unwrap();
+        let d = parse("policy: { docker: manual, up: auto }\nspec: {}\n").unwrap();
         assert_eq!(d.policy.pct, Mode::Auto);
         assert_eq!(d.policy.docker, Mode::Manual);
+        assert_eq!(d.policy.up, Mode::Auto);
         assert!(parse("policy: { apply: auto }\nspec: {}\n").is_err());
     }
 
