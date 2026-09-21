@@ -181,19 +181,14 @@ fn substitute(s: &str, vars: &BTreeMap<&'static str, String>) -> String {
     out
 }
 
-/// Whether a map key is a pve-meta comment key (`foo__` documents `foo`,
-/// a bare `__` documents the map). They are notes for the editor, not
-/// compose, which rejects unknown keys.
-fn is_comment_key(k: &Value) -> bool {
-    k.as_str().is_some_and(|s| s.ends_with("__"))
-}
-
+/// Substitutes `${PVE_*}` vars through the value. Comment keys never reach
+/// here: compose reads through `pve-meta get` without `--comments`, which
+/// strips the editor's `__` notes server-side, so there is nothing to drop.
 fn walk(v: &mut Value, vars: &BTreeMap<&'static str, String>) {
     match v {
         Value::String(s) => *s = substitute(s, vars),
         Value::Sequence(items) => items.iter_mut().for_each(|i| walk(i, vars)),
         Value::Mapping(m) => {
-            m.retain(|k, _| !is_comment_key(k));
             m.iter_mut().for_each(|(_, val)| walk(val, vars));
         }
         Value::Tagged(t) => walk(&mut t.value, vars),
@@ -319,18 +314,6 @@ volumes:
             serde_yaml_ng::from_str("volumes:\n  a: { x-pve: { size: 1G, owner: \"x;id\" } }\n")
                 .unwrap();
         assert!(volumes(&spec).is_err());
-    }
-
-    #[test]
-    fn comment_keys_never_reach_compose() {
-        let spec: Value = serde_yaml_ng::from_str(
-            "__: the stack\nservices:\n  app:\n    image: x\n    image__: pinned on purpose\n    environment:\n      A: 1\n      A__: why\n",
-        )
-        .unwrap();
-        let text = render(&spec, &[], &Vars::default()).unwrap();
-        assert!(!text.contains("__"), "{text}");
-        let back: Value = serde_yaml_ng::from_str(&text).unwrap();
-        assert_eq!(back["services"]["app"]["environment"]["A"], Value::from(1));
     }
 
     #[test]

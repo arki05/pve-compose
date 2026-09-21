@@ -148,8 +148,9 @@ gone from the document leaves an orphan mount that `diff` and `apply` report
 until you `pct set --delete` it. A bind-backed volume does not get an image's
 initial content the way a native docker volume does.
 
-pve-meta comment keys (`image__: why this tag`) are dropped from the rendered
-file, so a note in the document never reaches compose.
+pve-meta comment keys (`image__: why this tag`) never reach the rendered
+file: compose reads through `pve-meta get` without `--comments`, which
+strips the editor's notes server-side.
 
 pve-meta limits that show up here: a bare `cache:` is a null and is refused,
 write `cache: {}`; dotted map keys (`driver_opts` and the map forms of `labels`
