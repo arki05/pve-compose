@@ -102,10 +102,18 @@ pub fn write_compose(vmid: u32, text: &str) -> Result<()> {
 /// lock, and refusal (by name) when another writer recorded the path.
 /// `Overwrite` keeps the old `pct push` semantics: apply converges.
 fn write_managed(vmid: u32, name: &str, path: &str, content: &str) -> Result<()> {
-    let entry = Entry::managed(OPERATOR, name, path, FileFormat::Yaml, "0644", "0:0", LocalEdits::Overwrite)
-        .map_err(anyhow::Error::msg)?;
+    let entry = Entry::managed(
+        OPERATOR,
+        name,
+        path,
+        FileFormat::Yaml,
+        "0644",
+        "0:0",
+        LocalEdits::Overwrite,
+    )
+    .map_err(anyhow::Error::msg)?;
     let files = GuestFiles::managed(vec![
-        Desired::direct(entry, content.as_bytes().to_vec()).map_err(anyhow::Error::msg)?,
+        Desired::direct(entry, content.as_bytes().to_vec()).map_err(anyhow::Error::msg)?
     ])
     .map_err(anyhow::Error::msg)?;
     let _lock = GuestLock::take(vmid, true)
@@ -116,8 +124,8 @@ fn write_managed(vmid: u32, name: &str, path: &str, content: &str) -> Result<()>
     }
     let mut problems = Vec::new();
     for d in &report.items {
-        let clean =
-            !matches!(d.item.action, Action::Refused(_)) && matches!(d.outcome, None | Some(Outcome::Done));
+        let clean = !matches!(d.item.action, Action::Refused(_))
+            && matches!(d.outcome, None | Some(Outcome::Done));
         if let Some(line) = guest::describe(d) {
             if !clean {
                 problems.push(line);
