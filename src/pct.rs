@@ -310,9 +310,9 @@ pub fn read_file(vmid: u32, path: &str) -> Result<Option<String>> {
     }
 }
 
-/// File writes inside the guest go through the guest-files library
-/// (`stack::write_managed`): validated paths, atomic rename and manifest
-/// tracking, not a bare `pct push`.
+// File writes inside the guest go through the guest-files library
+// (`stack::write_managed`): validated paths, atomic rename and manifest
+// tracking, not a bare `pct push`.
 
 pub fn start(vmid: u32) -> Result<()> {
     cmd::run("pct", &["start", &vmid.to_string()]).map(|_| ())
