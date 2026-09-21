@@ -457,8 +457,8 @@ dependencies = [
 
 [[package]]
 name = "pve-meta-core"
-version = "0.3.1"
-source = "git+https://github.com/arki05/pve-meta.git?tag=v0.3.1#71b387a594f143678e30c19c8114e33ca08a1150"
+version = "0.3.2"
+source = "git+https://github.com/arki05/pve-meta.git?tag=v0.3.2#ea8ae83dd06cc7e59608dd68a9a63b93498b40da"
 dependencies = [
  "anyhow",
  "hex",
@@ -474,8 +474,8 @@ dependencies = [
 
 [[package]]
 name = "pve-meta-guest-files"
-version = "0.3.1"
-source = "git+https://github.com/arki05/pve-meta.git?tag=v0.3.1#71b387a594f143678e30c19c8114e33ca08a1150"
+version = "0.3.2"
+source = "git+https://github.com/arki05/pve-meta.git?tag=v0.3.2#ea8ae83dd06cc7e59608dd68a9a63b93498b40da"
 dependencies = [
  "anyhow",
  "libc",
