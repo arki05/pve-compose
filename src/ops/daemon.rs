@@ -133,7 +133,6 @@ fn pass(ctx: &Ctx, memo: &mut HashMap<u32, Memo>) -> Result<()> {
                         pull: policy.pull == Mode::Auto,
                         no_up: policy.up == Mode::Manual,
                         only_if_up: true,
-                        ..Default::default()
                     },
                 )?;
                 eprintln!(
