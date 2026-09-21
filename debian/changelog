@@ -1,3 +1,10 @@
+pve-compose (0.0.6-1) trixie; urgency=medium
+
+  * CI lint fix (needless struct update on newer clippy). 0.0.5 never
+    published.
+
+ -- Julius Arkenberg <julius@rkenberg.de>  Tue, 22 Sep 2026 00:35:00 +0200
+
 pve-compose (0.0.5-1) trixie; urgency=medium
 
   * New policy key `up` (default `manual`): the loop renders and pushes
