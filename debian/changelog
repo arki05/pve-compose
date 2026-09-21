@@ -1,3 +1,10 @@
+pve-compose (0.0.4-1) trixie; urgency=medium
+
+  * CI lint fixes only (rustfmt, one doc-comment newline newer clippy
+    rejects). No behaviour change since 0.0.3, which never published.
+
+ -- Julius Arkenberg <julius@rkenberg.de>  Mon, 21 Sep 2026 20:45:00 +0200
+
 pve-compose (0.0.3-1) trixie; urgency=medium
 
   * The compose file and the facts file inside the guest go through the
