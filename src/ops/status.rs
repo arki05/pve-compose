@@ -80,7 +80,7 @@ fn row(ctx: &Ctx, l: &pct::Listed, read: Option<doc::Read>, level: Level) -> Row
     let g = match ops::load_with(ctx, read) {
         Ok(g) => g,
         Err(e) => {
-            r.state = format!("error: {e}");
+            r.state = format!("error: {e:#}");
             return r;
         }
     };
@@ -88,7 +88,7 @@ fn row(ctx: &Ctx, l: &pct::Listed, read: Option<doc::Read>, level: Level) -> Row
         match apply::pct_plan(ctx, &g) {
             Ok(p) => r.pct_pending = Some(p.ops.len()),
             Err(e) => {
-                r.state = format!("error: {e}");
+                r.state = format!("error: {e:#}");
                 return r;
             }
         }
@@ -115,7 +115,7 @@ fn row(ctx: &Ctx, l: &pct::Listed, read: Option<doc::Read>, level: Level) -> Row
         }
         Ok(None) => r.state = "never".into(),
         Err(e) => {
-            r.state = format!("error: {e}");
+            r.state = format!("error: {e:#}");
             return r;
         }
     }
@@ -166,7 +166,7 @@ pub fn rows(ctx: &Ctx, vmid: Option<u32>, level: Level) -> Result<Vec<Row>> {
                     node: ctx.node.clone(),
                     running: l.running,
                     policy: None,
-                    state: format!("error: {e}"),
+                    state: format!("error: {e:#}"),
                     applied_at: None,
                     template: None,
                     pct_pending: None,
