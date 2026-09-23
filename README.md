@@ -251,7 +251,9 @@ It never: starts a stack, pulls with `pull: manual`, reboots a guest,
 acts on a stopped guest, deletes or shrinks a disk, touches another node's
 guest. One guest at a time; a failed guest is retried on the next document
 change or full pass. A per-guest lock in `/run/lock/pve-compose/` serialises the
-loop and hand-run verbs.
+loop and hand-run verbs, the passthrough ones included: a `docker logs -f` left
+running holds that guest's lock, and the loop says the guest is busy and retries
+it on the next pass.
 
 ## Migrating a stack by hand
 

@@ -13,6 +13,7 @@ use anyhow::{bail, Result};
 use clap::{Args, Parser, Subcommand};
 
 use pve_compose::cmd;
+use pve_compose::lock::GuestLock;
 use pve_compose::ops::{self, apply, configcmd, daemon, diff, new, status, upgrade, Ctx};
 use pve_compose::pct;
 use pve_compose::size::Size;
@@ -297,6 +298,10 @@ fn run(cli: Cli) -> Result<()> {
                     Some(v) => v,
                     None => bail!("usage: pve-compose docker {verb} <vmid> [compose arguments]"),
                 };
+                // The same lock every other verb takes: a passthrough is a
+                // `docker compose` in the stack directory like the loop's,
+                // and the two must not run there at once.
+                let _lock = GuestLock::take(vmid, 60)?;
                 ops::require_running(&ctx, vmid)?;
                 let mut rest = vec![verb];
                 rest.extend(args.iter().skip(2).cloned());
