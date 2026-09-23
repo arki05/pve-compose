@@ -29,13 +29,17 @@ schema:
           type: string
           enum: [auto, manual]
           default: auto
-          description: Render and push the compose file when the document changes; compose up only if the stack is already up.
+          description: Render and push the compose file when the document changes.
+        up:
+          type: string
+          enum: [auto, manual]
+          default: manual
+          description: compose up on a document change, and only if the stack is already up; manual renders the file and leaves starting to a human. A hand-run apply always ups.
         pull:
           type: string
           enum: [auto, manual]
           default: manual
-          description: Pull newer images before compose up.
+          description: Pull newer images before the loop's compose up.
     spec:
       type: object
-      multiline: true
-      description: The compose document. Named volumes get x-pve {storage,size,owner,backup} for a disk or {path} for a host bind; others are directories on the stack disk.
+      description: The compose document. Named volumes get x-pve {storage,size,owner,backup} for a disk or {path} for a host bind; others are directories on the stack disk. What a path or a storage may be is the node's `limits` in /etc/pve/pve-compose.cfg.
