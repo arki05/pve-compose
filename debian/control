@@ -8,7 +8,8 @@ Homepage: https://github.com/arki05/pve-compose
 
 Package: pve-compose
 Architecture: any
-Depends: ${shlibs:Depends}, ${misc:Depends}, pve-meta, pve-container, zstd
+Depends: ${shlibs:Depends}, ${misc:Depends}, pve-meta (>= 0.3.2), pve-manager,
+ pve-container, zstd
 Description: docker compose stacks in LXC wrappers, driven by pve-meta documents
  Each managed container carries its compose document in its pve-meta
  metadata. pve-compose renders it into the container, turns named volumes

@@ -14,7 +14,7 @@
 //! * `doc`: the `compose` subtree of the guest's pve-meta document.
 //! * `config`: `/etc/pve/pve-compose.cfg`, the operator's persisted choices.
 //! * `prompt`: questions for a human, asked before anything is done.
-//! * `cmd`, `size`, `lock`: helpers.
+//! * `cmd`, `size`, `lock`, `notify`: helpers.
 //!
 //! Facts about what was applied live on the stack disk inside the guest
 //! (`stack::Facts`), never in the document: the document is intent.
@@ -23,6 +23,7 @@ pub mod cmd;
 pub mod config;
 pub mod doc;
 pub mod lock;
+pub mod notify;
 pub mod ops;
 pub mod pct;
 pub mod plan;

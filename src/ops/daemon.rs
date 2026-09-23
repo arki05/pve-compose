@@ -30,6 +30,7 @@ use anyhow::Result;
 use crate::cmd;
 use crate::config::Config;
 use crate::doc::{self, Mode};
+use crate::notify;
 use crate::ops::{self, apply, Ctx};
 use crate::pct;
 use crate::stack;
@@ -50,7 +51,9 @@ pub fn run(mut ctx: Ctx) -> Result<()> {
         interval.as_secs(),
         full_every.as_secs()
     );
+    notify::ready();
     loop {
+        notify::watchdog();
         let token = match cmd::pvesh_get("/meta/version", &[]) {
             Ok(v) => v
                 .get("token")
@@ -155,6 +158,8 @@ fn pass(ctx: &Ctx, memo: &mut HashMap<u32, Memo>) -> Result<()> {
         // Remembered either way: a failure is retried on the next full pass
         // or the next document change, not every poll.
         memo.insert(vmid, Memo { digest });
+        // One guest done is the progress the unit's WatchdogSec measures.
+        notify::watchdog();
     }
     Ok(())
 }

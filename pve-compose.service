@@ -5,11 +5,16 @@ After=pve-cluster.service pvedaemon.service
 Requires=pve-cluster.service
 
 [Service]
-Type=simple
+Type=notify
 Environment=LANG=C.UTF-8 LC_ALL=C.UTF-8
 ExecStart=/usr/sbin/pve-compose daemon
 Restart=on-failure
 RestartSec=10s
+# The loop pings around every poll and after every guest. The longest gap
+# between two pings is one guest's apply, and the longest command in one is
+# capped at 30 minutes (cmd::LONG_TIMEOUT: a compose up that pulls, the
+# docker install), so this has to be comfortably above that.
+WatchdogSec=45min
 
 [Install]
 WantedBy=multi-user.target

@@ -247,6 +247,11 @@ fails with the guest and the call named, so a hung container cannot hold the
 node's other guests. A hand-run `pve-compose docker <verb>` has no deadline:
 a human started it and knows how long `logs -f` should run.
 
+The unit is `Type=notify` with `WatchdogSec=45min`, and the loop pings systemd
+around every poll and after every guest, so a loop that stops making progress
+altogether is restarted. The value is above the longest thing one guest may
+legitimately take.
+
 It never: starts a stack, pulls with `pull: manual`, reboots a guest,
 acts on a stopped guest, deletes or shrinks a disk, touches another node's
 guest. One guest at a time; a failed guest is retried on the next document
