@@ -238,6 +238,14 @@ every such guest and applies what `policy` allows. The docker half applies a
 changed document to a stack that is up; on a stack that is down it writes the
 file and starts nothing. Starting is always a hand-run `docker apply`.
 
+Every command it runs has a deadline: 120 seconds for a read, a probe or one
+of PVE's quick verbs, 30 minutes for the ones that legitimately take minutes
+(a `compose up` that pulls, the docker install, a template download, a disk
+allocation). Past it the command's process group is killed and that guest
+fails with the guest and the call named, so a hung container cannot hold the
+node's other guests. A hand-run `pve-compose docker <verb>` has no deadline:
+a human started it and knows how long `logs -f` should run.
+
 It never: starts a stack, pulls with `pull: manual`, reboots a guest,
 acts on a stopped guest, deletes or shrinks a disk, touches another node's
 guest. One guest at a time; a failed guest is retried on the next document

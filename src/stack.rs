@@ -145,17 +145,28 @@ fn compose() -> String {
     format!("cd {STACK_DIR} && docker compose")
 }
 
-/// `docker compose up -d --remove-orphans`, output on the terminal.
+/// `docker compose up -d --remove-orphans`, output on the terminal. Pulling
+/// images is part of it, so it gets the long deadline, not no deadline: the
+/// loop runs this too.
 pub fn up(vmid: u32) -> Result<()> {
-    pct::exec_stream(vmid, &format!("{} up -d --remove-orphans", compose()))
+    pct::exec_stream_within(
+        vmid,
+        &format!("{} up -d --remove-orphans", compose()),
+        crate::cmd::LONG_TIMEOUT,
+    )
 }
 
 /// `docker compose pull`, output on the terminal.
 pub fn pull(vmid: u32) -> Result<()> {
-    pct::exec_stream(vmid, &format!("{} pull", compose()))
+    pct::exec_stream_within(
+        vmid,
+        &format!("{} pull", compose()),
+        crate::cmd::LONG_TIMEOUT,
+    )
 }
 
-/// Any `docker compose` command line, output on the terminal.
+/// Any `docker compose` command line, output on the terminal. A human's
+/// verb, so it runs as long as they let it (`logs -f`, `exec`).
 pub fn passthrough(vmid: u32, args: &[String]) -> Result<()> {
     let quoted: Vec<String> = args.iter().map(|a| shell_quote(a)).collect();
     pct::exec_stream(vmid, &format!("{} {}", compose(), quoted.join(" ")))

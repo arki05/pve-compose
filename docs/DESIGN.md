@@ -121,7 +121,13 @@ next document change or the next full pass, not every poll.
 
 The loop is single-threaded, one guest at a time. A slow apply on one guest (a
 first docker install takes two minutes) delays the others on that node for that
-long. Acceptable at this scale, and nothing interleaves.
+long. Acceptable at this scale, and nothing interleaves. What is not acceptable
+is *forever*: a container whose docker daemon is wedged answers no `pct exec` at
+all, so every call has a deadline (`cmd::TIMEOUT`, `cmd::LONG_TIMEOUT`) and is
+killed with its process group past it, which fails that guest and leaves the
+pass to the others. The bounded runner is guest-files' own
+(`pve_meta_guest_files::pct::run`), the one that already writes the files,
+rather than a second one here.
 
 ## The loop applies changes; it never starts a stack
 

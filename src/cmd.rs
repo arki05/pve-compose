@@ -4,12 +4,30 @@
 //! command line and stderr in the error, for anything whose output the tool
 //! reads; `stream` inherits the terminal, for anything a human wants to watch
 //! (compose output, a template build). Both log the command at debug level.
+//!
+//! Every call has a deadline. The loop is single-threaded and most of what it
+//! runs ends up inside a guest, so one hung `docker info` or `apt-get` in one
+//! container must not hold the node's other guests for good: `run` goes
+//! through [`pve_meta_guest_files::pct::run`], which kills the process group
+//! past the deadline and caps the output, and `stream` does the same killing
+//! around an inherited terminal. [`TIMEOUT`] covers reads, probes and PVE's
+//! own quick verbs; [`LONG_TIMEOUT`] is for the ones that legitimately take
+//! minutes (a compose up that pulls, the docker install, a template
+//! download, a disk allocation) and is named at those call sites.
 
 use std::process::{Command, Stdio};
+use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, bail, Context, Result};
 
+/// The deadline for a read, a probe or one of PVE's quick verbs.
+pub const TIMEOUT: Duration = Duration::from_secs(120);
+
+/// The deadline for the slow ones, asked for explicitly.
+pub const LONG_TIMEOUT: Duration = Duration::from_secs(30 * 60);
+
 /// Captured output of a finished command.
+#[derive(Debug)]
 pub struct Output {
     pub status: i32,
     pub stdout: String,
@@ -33,7 +51,12 @@ fn render(program: &str, args: &[&str]) -> String {
 
 /// Runs `program args`, capturing both streams. Fails on a non-zero exit.
 pub fn run(program: &str, args: &[&str]) -> Result<Output> {
-    let out = run_status(program, args)?;
+    run_within(program, args, TIMEOUT)
+}
+
+/// [`run`] with a deadline of its own.
+pub fn run_within(program: &str, args: &[&str], timeout: Duration) -> Result<Output> {
+    let out = run_status_within(program, args, timeout)?;
     if out.status != 0 {
         bail!(
             "{} failed (exit {}){}",
@@ -52,32 +75,76 @@ pub fn run(program: &str, args: &[&str]) -> Result<Output> {
 /// Like [`run`], but a non-zero exit is returned, not an error. For commands
 /// whose exit status carries meaning (`pve-meta get` exits 2 for "not there").
 pub fn run_status(program: &str, args: &[&str]) -> Result<Output> {
+    run_status_within(program, args, TIMEOUT)
+}
+
+/// [`run_status`] with a deadline of its own. Past it the command's whole
+/// process group is killed and this is an error saying so.
+pub fn run_status_within(program: &str, args: &[&str], timeout: Duration) -> Result<Output> {
     if verbose() {
         eprintln!("+ {}", render(program, args));
     }
-    let out = Command::new(program)
-        .args(args)
-        .stdin(Stdio::null())
-        .output()
-        .with_context(|| format!("cannot run {program}"))?;
+    let out = pve_meta_guest_files::pct::run(program, args, None, timeout)?;
     Ok(Output {
-        status: out.status.code().unwrap_or(-1),
+        status: out.status,
         stdout: String::from_utf8_lossy(&out.stdout).into_owned(),
-        stderr: String::from_utf8_lossy(&out.stderr).into_owned(),
+        stderr: out.stderr,
     })
 }
 
 /// Runs `program args` with the terminal attached, so the user sees the
-/// output as it happens. Fails on a non-zero exit.
+/// output as it happens, with no deadline: for a command a human started and
+/// is watching (`docker compose logs -f`), which only they know the length of.
+/// Fails on a non-zero exit.
 pub fn stream(program: &str, args: &[&str]) -> Result<()> {
+    let mut child = spawn_streaming(program, args, false)?;
+    finish(program, args, child.wait()?)
+}
+
+/// [`stream`] with a deadline: for the long ones the daemon runs too, where
+/// nobody is watching and a hung command would hold every other guest on the
+/// node. Without a terminal the command gets its own process group, so the
+/// whole of it is killed; with one it stays in the shell's, so `^C` still
+/// reaches it, and the deadline kills the command itself.
+pub fn stream_within(program: &str, args: &[&str], timeout: Duration) -> Result<()> {
+    let own_group = !crate::prompt::interactive();
+    let mut child = spawn_streaming(program, args, own_group)?;
+    let deadline = Instant::now() + timeout;
+    let status = loop {
+        if let Some(s) = child.try_wait()? {
+            break s;
+        }
+        if Instant::now() >= deadline {
+            let pid = child.id() as i32;
+            // SAFETY: kill(2) on the child, or on the negated id of the
+            // process group it leads when it was given one.
+            unsafe { libc::kill(if own_group { -pid } else { pid }, libc::SIGKILL) };
+            let _ = child.wait();
+            bail!(
+                "{}: no answer after {}s, killed",
+                render(program, args),
+                timeout.as_secs()
+            );
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    };
+    finish(program, args, status)
+}
+
+fn spawn_streaming(program: &str, args: &[&str], own_group: bool) -> Result<std::process::Child> {
     if verbose() {
         eprintln!("+ {}", render(program, args));
     }
-    let status = Command::new(program)
-        .args(args)
-        .stdin(Stdio::null())
-        .status()
-        .with_context(|| format!("cannot run {program}"))?;
+    let mut c = Command::new(program);
+    c.args(args).stdin(Stdio::null());
+    if own_group {
+        use std::os::unix::process::CommandExt as _;
+        c.process_group(0);
+    }
+    c.spawn().with_context(|| format!("cannot run {program}"))
+}
+
+fn finish(program: &str, args: &[&str], status: std::process::ExitStatus) -> Result<()> {
     if !status.success() {
         return Err(anyhow!(
             "{} failed (exit {})",
@@ -151,4 +218,44 @@ pub fn nodename() -> Result<String> {
         bail!("cannot determine the node name");
     }
     Ok(short.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_command_that_never_ends_is_killed() {
+        let started = Instant::now();
+        let out = run_status_within(
+            "sh",
+            &["-c", "sleep 30 & sleep 30"],
+            Duration::from_millis(300),
+        );
+        let err = out.unwrap_err().to_string();
+        assert!(err.contains("killed"), "{err}");
+        let err = stream_within(
+            "sh",
+            &["-c", "sleep 30 & sleep 30"],
+            Duration::from_millis(300),
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(err.contains("no answer after 0s, killed"), "{err}");
+        assert!(started.elapsed() < Duration::from_secs(10));
+    }
+
+    #[test]
+    fn output_and_status_come_back() {
+        let out = run_status("sh", &["-c", "echo out; echo err >&2; exit 3"]).unwrap();
+        assert_eq!(
+            (out.status, out.stdout.trim(), out.stderr.trim()),
+            (3, "out", "err")
+        );
+        let err = run("sh", &["-c", "echo nope >&2; exit 1"])
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("exit 1") && err.contains("nope"), "{err}");
+        stream("sh", &["-c", "exit 0"]).unwrap();
+    }
 }

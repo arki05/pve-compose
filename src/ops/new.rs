@@ -70,7 +70,8 @@ pub fn create_wrapper(w: &WrapperSpec) -> Result<()> {
         args.push("--tags");
         args.push(&tags);
     }
-    cmd::run("pct", &args).map(|_| ())
+    // Unpacking a template takes minutes on a slow storage.
+    cmd::run_within("pct", &args, cmd::LONG_TIMEOUT).map(|_| ())
 }
 
 pub struct NewArgs {

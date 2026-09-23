@@ -57,7 +57,7 @@ pub fn download_base(ctx: &Ctx, storage: &str) -> Result<String> {
     let base = &ctx.config.template.base;
     let arch = arch()?;
     eprintln!("template: fetching the {base} template list");
-    cmd::run("pveam", &["update"])?;
+    cmd::run_within("pveam", &["update"], cmd::LONG_TIMEOUT)?;
     let out = cmd::run("pveam", &["available", "--section", "system"])?;
     let mut names: Vec<&str> = out
         .stdout
@@ -70,7 +70,7 @@ pub fn download_base(ctx: &Ctx, storage: &str) -> Result<String> {
         bail!("no upstream {arch} template starts with {base}_ (pveam available)");
     };
     eprintln!("template: downloading {name} to {storage}");
-    cmd::stream("pveam", &["download", storage, name])?;
+    cmd::stream_within("pveam", &["download", storage, name], cmd::LONG_TIMEOUT)?;
     Ok(format!("{storage}:vztmpl/{name}"))
 }
 

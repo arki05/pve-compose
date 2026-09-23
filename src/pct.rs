@@ -4,6 +4,7 @@
 
 use std::collections::BTreeMap;
 use std::fmt;
+use std::time::Duration;
 
 use anyhow::{anyhow, bail, Context, Result};
 use serde_json::Value;
@@ -255,25 +256,57 @@ pub fn list(node: &str) -> Result<Vec<Listed>> {
     Ok(out)
 }
 
-/// `pct set <vmid> <args>`.
+/// `pct set <vmid> <args>`. Allocating a disk is one of these, so it gets
+/// the long deadline.
 pub fn set(vmid: u32, args: &[&str]) -> Result<()> {
     let vm = vmid.to_string();
     let mut all = vec!["set", vm.as_str()];
     all.extend_from_slice(args);
-    cmd::run("pct", &all).map(|_| ())
+    cmd::run_within("pct", &all, cmd::LONG_TIMEOUT).map(|_| ())
 }
 
 /// `pct resize <vmid> <disk> <size>`.
 pub fn resize(vmid: u32, disk: &str, size: Size) -> Result<()> {
     let vm = vmid.to_string();
-    cmd::run("pct", &["resize", &vm, disk, &size.to_pct_resize()]).map(|_| ())
+    cmd::run_within(
+        "pct",
+        &["resize", &vm, disk, &size.to_pct_resize()],
+        cmd::LONG_TIMEOUT,
+    )
+    .map(|_| ())
+}
+
+/// The first line of a script, shortened: what names the call in an error
+/// about a guest that did not answer.
+fn brief(script: &str) -> String {
+    let line = script
+        .lines()
+        .find(|l| !l.trim().is_empty())
+        .unwrap_or("")
+        .trim();
+    if line.chars().count() > 60 {
+        format!("{}…", line.chars().take(59).collect::<String>())
+    } else {
+        line.to_string()
+    }
 }
 
 /// Runs a shell command line inside the guest, capturing output. A non-zero
-/// exit is returned in `Output.status`, not as an error.
+/// exit is returned in `Output.status`, not as an error; a guest that does
+/// not answer within the deadline is one, naming the guest and the call.
 pub fn exec_status(vmid: u32, script: &str) -> Result<cmd::Output> {
+    exec_status_within(vmid, script, cmd::TIMEOUT)
+}
+
+/// [`exec_status`] with a deadline of its own.
+pub fn exec_status_within(vmid: u32, script: &str, timeout: Duration) -> Result<cmd::Output> {
     let vm = vmid.to_string();
-    cmd::run_status("pct", &["exec", &vm, "--", "/bin/sh", "-c", script])
+    cmd::run_status_within(
+        "pct",
+        &["exec", &vm, "--", "/bin/sh", "-c", script],
+        timeout,
+    )
+    .with_context(|| format!("guest {vmid}: `{}`", brief(script)))
 }
 
 /// Runs a shell command line inside the guest; fails on a non-zero exit.
@@ -290,10 +323,23 @@ pub fn exec(vmid: u32, script: &str) -> Result<cmd::Output> {
     Ok(out)
 }
 
-/// Runs a shell command line inside the guest with the terminal attached.
+/// Runs a shell command line inside the guest with the terminal attached and
+/// no deadline: for what a human typed and watches (`docker compose logs -f`).
 pub fn exec_stream(vmid: u32, script: &str) -> Result<()> {
     let vm = vmid.to_string();
     cmd::stream("pct", &["exec", &vm, "--", "/bin/sh", "-c", script])
+        .with_context(|| format!("guest {vmid}: `{}`", brief(script)))
+}
+
+/// [`exec_stream`] with a deadline: for the long ones the daemon runs too.
+pub fn exec_stream_within(vmid: u32, script: &str, timeout: Duration) -> Result<()> {
+    let vm = vmid.to_string();
+    cmd::stream_within(
+        "pct",
+        &["exec", &vm, "--", "/bin/sh", "-c", script],
+        timeout,
+    )
+    .with_context(|| format!("guest {vmid}: `{}`", brief(script)))
 }
 
 /// Reads a file from inside the guest. `Ok(None)` when it does not exist.
@@ -315,7 +361,7 @@ pub fn read_file(vmid: u32, path: &str) -> Result<Option<String>> {
 // tracking, not a bare `pct push`.
 
 pub fn start(vmid: u32) -> Result<()> {
-    cmd::run("pct", &["start", &vmid.to_string()]).map(|_| ())
+    cmd::run_within("pct", &["start", &vmid.to_string()], cmd::LONG_TIMEOUT).map(|_| ())
 }
 
 /// One storage of this node, from `GET /nodes/{node}/storage`.

@@ -7,6 +7,7 @@
 
 use anyhow::{bail, Result};
 
+use crate::cmd;
 use crate::pct;
 use crate::stack;
 
@@ -31,7 +32,7 @@ pub fn ensure_docker(vmid: u32) -> Result<()> {
     if stack::docker_ok(vmid)? {
         return Ok(());
     }
-    match pct::exec_stream(vmid, SCRIPT) {
+    match pct::exec_stream_within(vmid, SCRIPT, cmd::LONG_TIMEOUT) {
         Ok(()) => Ok(()),
         Err(e) => bail!("guest {vmid}: docker install failed: {e}"),
     }
