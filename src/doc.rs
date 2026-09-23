@@ -198,31 +198,28 @@ pub fn project_name_from(hostname: &str) -> String {
     }
 }
 
-/// Writes `text` as guest `vmid`'s whole `compose` subtree.
-pub fn write(vmid: u32, text: &str) -> Result<()> {
-    write_prefix(vmid, PREFIX, text)
-}
-
-/// Writes `text` (YAML) as the whole `prefix` subtree of guest `vmid`'s
-/// document, through `pve-meta set --file`.
-pub fn write_prefix(vmid: u32, prefix: &str, text: &str) -> Result<()> {
-    let tmp = std::env::temp_dir().join(format!(
-        "pve-compose-{prefix}-{vmid}-{}.yaml",
-        std::process::id()
-    ));
-    std::fs::write(&tmp, text).with_context(|| format!("cannot write {}", tmp.display()))?;
+/// Writes the first `compose` subtree of a guest that is not supposed to have
+/// a document at all (`new`), through `pve-meta set --text`: the payload goes
+/// on the command line, not through a file under the node's temp directory
+/// that anything else could have put there first.
+///
+/// `--digest ""` is pve-meta's "the document must not exist", so a document
+/// left behind by an earlier guest of this vmid is a refusal here, never a
+/// replacement of someone else's intent.
+pub fn write_initial(vmid: u32, text: &str) -> Result<()> {
+    let vm = vmid.to_string();
     let res = cmd::run(
         "pve-meta",
-        &[
-            "set",
-            &vmid.to_string(),
-            prefix,
-            "--file",
-            &tmp.to_string_lossy(),
-        ],
+        &["set", &vm, PREFIX, "--text", text, "--digest", ""],
     );
-    let _ = std::fs::remove_file(&tmp);
-    res.map(|_| ())
+    match res {
+        Ok(_) => Ok(()),
+        Err(e) if format!("{e:#}").contains("digest mismatch") => bail!(
+            "guest {vmid} already has a pve-meta document; `new` writes the first one and never \
+             replaces one (`pve-meta get {vmid}` shows what is there)"
+        ),
+        Err(e) => Err(e),
+    }
 }
 
 pub fn digest(text: &str) -> String {

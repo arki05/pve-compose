@@ -229,7 +229,7 @@ pub fn new(ctx: &Ctx, a: &NewArgs) -> Result<()> {
     eprintln!("new: creating {vmid} ({}) from {template}", a.name);
     create_wrapper(&w)?;
 
-    doc::write(vmid, initial_document())?;
+    doc::write_initial(vmid, initial_document())?;
     eprintln!("new: document written");
 
     // Hold the lock from the start, so the daemon's first pass waits for

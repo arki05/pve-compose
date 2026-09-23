@@ -95,7 +95,8 @@ pve-compose daemon                                     # what the unit runs
   numbered question at the terminal, and an answer is offered for storing.
   Without a terminal it stops and names the `config set` command instead.
   Then it creates an unprivileged wrapper from the template, tags it, writes a
-  document with the default policy and an empty `spec`, starts it, installs
+  document with the default policy and an empty `spec` (refusing if that vmid
+  already has a document, rather than replacing it), starts it, installs
   docker (with a one-off `hello-world` run as the smoke test), applies. Write
   the stack into `compose.spec`, put data under `/opt/stack/volumes/` and
   secrets in `/opt/stack/.env`. With no services in the document nothing is
