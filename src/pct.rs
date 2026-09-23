@@ -342,11 +342,25 @@ pub fn exec_stream_within(vmid: u32, script: &str, timeout: Duration) -> Result<
     .with_context(|| format!("guest {vmid}: `{}`", brief(script)))
 }
 
-/// Reads a file from inside the guest. `Ok(None)` when it does not exist.
+/// The most of a guest file this tool reads. The files it reads are a
+/// compose document and a facts file, both of them small; anything larger is
+/// something else, and a `cat` of it into memory is the guest's to decide.
+pub const MAX_READ: usize = 1 << 20;
+
+/// Reads a file from inside the guest. `Ok(None)` when it does not exist, an
+/// error above [`MAX_READ`] bytes: `head` stops one byte past the cap, so
+/// neither the guest nor the node ever carries more (guest-files' `Pct::read`
+/// does the same).
 pub fn read_file(vmid: u32, path: &str) -> Result<Option<String>> {
-    let script = format!("if [ -e '{path}' ]; then cat '{path}'; else exit 3; fi");
+    let script = format!(
+        "if [ -e '{path}' ]; then exec head -c {} '{path}'; else exit 3; fi",
+        MAX_READ + 1
+    );
     let out = exec_status(vmid, &script)?;
     match out.status {
+        0 if out.stdout.len() > MAX_READ => {
+            bail!("in guest {vmid}: {path} is above {} bytes", MAX_READ)
+        }
         0 => Ok(Some(out.stdout)),
         3 => Ok(None),
         s => bail!(
