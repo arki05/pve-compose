@@ -7,13 +7,13 @@
 //! * `x-pve: { storage, size, owner?, backup? }` -- a PVE disk of its own,
 //!   mounted there. Grow-only, never moved, never deleted by this tool.
 //! * `x-pve: { path, owner? }` -- a bind mount of a host path.
-//!
-//! What a document may ask for at that level is not what writing a document
-//! takes: [`crate::config::Limits`] bounds the bind paths, the storages and
-//! the disk size, and a volume outside them is refused here, before any plan
-//! exists (README, "Trust").
 //! * no `x-pve` -- a plain directory on the stack disk.
 //! * `external: true` -- left alone entirely.
+//!
+//! What a document may ask for there is not what writing a document takes:
+//! [`crate::config::Limits`] bounds the bind paths, the storages and the disk
+//! size, and a volume outside them is refused here, before any plan exists
+//! (README, "Trust").
 //!
 //! Rendering replaces each managed volume's definition with a bind to that
 //! directory, drops `x-pve`, and substitutes `${PVE_VMID}`,
@@ -142,7 +142,7 @@ fn check_storage(name: &str, storage: &str, limits: &Limits) -> Result<()> {
 
 /// A disk size a document asked for, held against `limits.max_disk_gib`.
 fn check_size(name: &str, size: Size, limits: &Limits) -> Result<()> {
-    let ceiling = limits.max_disk_gib << 30;
+    let ceiling = limits.max_disk_gib.saturating_mul(1 << 30);
     if size.bytes() > ceiling {
         bail!(
             "spec.volumes.{name}.x-pve.size: {size} is above `limits.max_disk_gib` ({} GiB) in {}",
