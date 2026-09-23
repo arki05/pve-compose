@@ -61,7 +61,7 @@ pub fn run(mut ctx: Ctx) -> Result<()> {
                 .unwrap_or("")
                 .to_string(),
             Err(e) => {
-                eprintln!("version poll failed: {e}");
+                eprintln!("version poll failed: {e:#}");
                 std::thread::sleep(interval);
                 continue;
             }
@@ -74,7 +74,7 @@ pub fn run(mut ctx: Ctx) -> Result<()> {
                 memo.clear();
             }
             Ok(_) => {}
-            Err(e) => eprintln!("configuration not re-read: {e}"),
+            Err(e) => eprintln!("configuration not re-read: {e:#}"),
         }
         if token != last_token || full {
             if full {
@@ -82,7 +82,7 @@ pub fn run(mut ctx: Ctx) -> Result<()> {
                 last_full = Instant::now();
             }
             if let Err(e) = pass(&ctx, &mut memo) {
-                eprintln!("pass failed: {e}");
+                eprintln!("pass failed: {e:#}");
             }
             last_token = token;
         }
@@ -99,7 +99,7 @@ fn pass(ctx: &Ctx, memo: &mut HashMap<u32, Memo>) -> Result<()> {
             Ok(Some(r)) => r,
             Ok(None) => continue,
             Err(e) => {
-                eprintln!("{}: {e}", l.vmid);
+                eprintln!("{}: {e:#}", l.vmid);
                 continue;
             }
         };
@@ -153,7 +153,7 @@ fn pass(ctx: &Ctx, memo: &mut HashMap<u32, Memo>) -> Result<()> {
             Ok(())
         })();
         if let Err(e) = result {
-            eprintln!("{vmid}: {e}");
+            eprintln!("{vmid}: {e:#}");
         }
         // Remembered either way: a failure is retried on the next full pass
         // or the next document change, not every poll.
