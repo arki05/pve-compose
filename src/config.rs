@@ -15,6 +15,10 @@
 //!   memory: 2048
 //! nodes:
 //!   StorageCube: { storage: NetApp }   # disks on this node; storage names are per node
+//! limits:
+//!   bind_roots: [/NetApp/FileStore]   # what an x-pve.path may be under; empty: no binds
+//!   storages: [NetApp]                # what an x-pve.storage may name; empty: the node's own
+//!   max_disk_gib: 64                  # the largest disk one x-pve.size may ask for
 //! daemon:
 //!   interval: 30                   # seconds between version-token polls
 //!   full_every: 600                # seconds between unconditional passes
@@ -42,6 +46,8 @@ pub struct Config {
     pub defaults: Defaults,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub nodes: BTreeMap<String, NodeOverrides>,
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub limits: Limits,
     #[serde(default, skip_serializing_if = "is_default")]
     pub daemon: Daemon,
 }
@@ -144,6 +150,45 @@ pub struct NodeOverrides {
     pub storage: Option<String>,
 }
 
+/// What a guest's document may ask the node for. Writing a document takes
+/// `VM.Config.Options` on that guest, which is not what PVE asks for a bind
+/// mount (`root@pam` only) or for allocating on any storage, so `x-pve` is
+/// held to these bounds (README, "Trust"). Hand-edited: `config set` does
+/// not write them.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct Limits {
+    /// Host directories an `x-pve.path` may be, or be under. Empty (the
+    /// default): no document gets a bind mount.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub bind_roots: Vec<String>,
+    /// Storages an `x-pve.storage` may name. Empty (the default): only the
+    /// storage the node is configured with, which is where a volume without
+    /// a storage lands anyway.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub storages: Vec<String>,
+    /// The largest disk one `x-pve.size` may ask for, in GiB.
+    #[serde(default = "d_max_disk_gib", skip_serializing_if = "is_d_max_disk_gib")]
+    pub max_disk_gib: u64,
+}
+
+fn d_max_disk_gib() -> u64 {
+    64
+}
+fn is_d_max_disk_gib(v: &u64) -> bool {
+    *v == d_max_disk_gib()
+}
+
+impl Default for Limits {
+    fn default() -> Self {
+        Limits {
+            bind_roots: Vec::new(),
+            storages: Vec::new(),
+            max_disk_gib: d_max_disk_gib(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct Daemon {
@@ -228,6 +273,18 @@ impl Config {
     /// The persisted disk storage for `node`, if any.
     pub fn storage_for(&self, node: &str) -> Option<String> {
         self.nodes.get(node).and_then(|n| n.storage.clone())
+    }
+
+    /// The bounds a document on `node` is held to, with an empty storage
+    /// allow-list resolved to that node's own disk storage: a document may
+    /// name the storage its volumes would land on anyway, and nothing else
+    /// until `limits.storages` says so.
+    pub fn limits_for(&self, node: &str) -> Limits {
+        let mut l = self.limits.clone();
+        if l.storages.is_empty() {
+            l.storages = self.storage_for(node).into_iter().collect();
+        }
+        l
     }
 
     pub fn set_storage_for(&mut self, node: &str, storage: Option<String>) {

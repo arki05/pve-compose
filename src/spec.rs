@@ -7,6 +7,11 @@
 //! * `x-pve: { storage, size, owner?, backup? }` -- a PVE disk of its own,
 //!   mounted there. Grow-only, never moved, never deleted by this tool.
 //! * `x-pve: { path, owner? }` -- a bind mount of a host path.
+//!
+//! What a document may ask for at that level is not what writing a document
+//! takes: [`crate::config::Limits`] bounds the bind paths, the storages and
+//! the disk size, and a volume outside them is refused here, before any plan
+//! exists (README, "Trust").
 //! * no `x-pve` -- a plain directory on the stack disk.
 //! * `external: true` -- left alone entirely.
 //!
@@ -23,6 +28,7 @@ use anyhow::{bail, Context, Result};
 use serde::Deserialize;
 use serde_yaml_ng::{Mapping, Value};
 
+use crate::config::{self, Limits};
 use crate::doc::flag_opt;
 use crate::size::Size;
 use crate::VOLUMES_DIR;
@@ -61,6 +67,92 @@ struct XPve {
     backup: Option<bool>,
 }
 
+/// An absolute path with no empty, `.` or `..` segment: the only shape that
+/// can be held against an allow-list root by text alone.
+fn check_clean_absolute(path: &str) -> Result<()> {
+    let Some(rest) = path.strip_prefix('/') else {
+        bail!("'{path}' must be absolute");
+    };
+    if rest.is_empty() {
+        return Ok(());
+    }
+    for seg in rest.split('/') {
+        match seg {
+            "" => bail!("'{path}' has an empty segment (no '//', no trailing '/')"),
+            "." | ".." => bail!("'{path}' has a '{seg}' segment"),
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
+/// Whether `path` is `root` or lies under it.
+fn under(root: &str, path: &str) -> bool {
+    let prefix = if root == "/" {
+        "/".to_string()
+    } else {
+        format!("{root}/")
+    };
+    path == root || path.starts_with(&prefix)
+}
+
+/// A bind path a document asked for, held against `limits.bind_roots`.
+fn check_bind_path(name: &str, path: &str, limits: &Limits) -> Result<()> {
+    check_clean_absolute(path).with_context(|| format!("spec.volumes.{name}.x-pve.path"))?;
+    if limits.bind_roots.is_empty() {
+        bail!(
+            "spec.volumes.{name}.x-pve.path: host binds are refused; \
+             list the directories a document may bind under `limits.bind_roots` in {}",
+            config::PATH
+        );
+    }
+    for root in &limits.bind_roots {
+        check_clean_absolute(root)
+            .with_context(|| format!("{}: limits.bind_roots", config::PATH))?;
+        if under(root, path) {
+            return Ok(());
+        }
+    }
+    bail!(
+        "spec.volumes.{name}.x-pve.path: '{path}' is not under any of `limits.bind_roots` ({}) in {}",
+        limits.bind_roots.join(", "),
+        config::PATH
+    )
+}
+
+/// A storage a document named, held against `limits.storages` (already
+/// resolved to the node's own storage when the key is unset).
+fn check_storage(name: &str, storage: &str, limits: &Limits) -> Result<()> {
+    if limits.storages.iter().any(|s| s == storage) {
+        return Ok(());
+    }
+    if limits.storages.is_empty() {
+        bail!(
+            "spec.volumes.{name}.x-pve.storage: '{storage}' is refused; this node has no disk \
+             storage (`pve-compose config set storage <storage>`) and no `limits.storages` in {}",
+            config::PATH
+        );
+    }
+    bail!(
+        "spec.volumes.{name}.x-pve.storage: '{storage}' is not one of `limits.storages` ({}) in {}",
+        limits.storages.join(", "),
+        config::PATH
+    )
+}
+
+/// A disk size a document asked for, held against `limits.max_disk_gib`.
+fn check_size(name: &str, size: Size, limits: &Limits) -> Result<()> {
+    let ceiling = limits.max_disk_gib << 30;
+    if size.bytes() > ceiling {
+        bail!(
+            "spec.volumes.{name}.x-pve.size: {size} is above `limits.max_disk_gib` ({} GiB) in {}",
+            limits.max_disk_gib,
+            config::PATH
+        );
+    }
+    Ok(())
+}
+
 fn valid_volume_name(name: &str) -> bool {
     !name.is_empty()
         && name
@@ -69,8 +161,9 @@ fn valid_volume_name(name: &str) -> bool {
         && !name.starts_with('.')
 }
 
-/// The managed volumes of a compose document, in declaration order.
-pub fn volumes(spec: &Value) -> Result<Vec<Volume>> {
+/// The managed volumes of a compose document, in declaration order, each
+/// held against what the node allows a document to ask for.
+pub fn volumes(spec: &Value, limits: &Limits) -> Result<Vec<Volume>> {
     let mut out = Vec::new();
     let Some(vols) = spec.get("volumes") else {
         return Ok(out);
@@ -112,21 +205,25 @@ pub fn volumes(spec: &Value) -> Result<Vec<Volume>> {
                 }
                 let kind = match (&x.path, &x.storage, x.size) {
                     (Some(p), None, None) => {
-                        if !p.starts_with('/') {
-                            bail!("spec.volumes.{name}.x-pve.path must be absolute");
-                        }
                         if x.backup.is_some() {
                             bail!("spec.volumes.{name}.x-pve: backup applies to disks; PVE never backs up a bind mount");
                         }
+                        check_bind_path(&name, p, limits)?;
                         Kind::Bind { path: p.clone() }
                     }
                     (Some(_), _, _) => {
                         bail!("spec.volumes.{name}.x-pve: path and storage/size are exclusive")
                     }
-                    (None, storage, Some(size)) => Kind::Disk {
-                        storage: storage.clone(),
-                        size,
-                    },
+                    (None, storage, Some(size)) => {
+                        check_size(&name, size, limits)?;
+                        if let Some(s) = storage {
+                            check_storage(&name, s, limits)?;
+                        }
+                        Kind::Disk {
+                            storage: storage.clone(),
+                            size,
+                        }
+                    }
                     (None, Some(_), None) => {
                         bail!("spec.volumes.{name}.x-pve: storage needs a size")
                     }
@@ -267,10 +364,23 @@ volumes:
   ext:   { external: true }
 "#;
 
+    /// The bounds the SPEC above needs: its bind root and its storage.
+    fn limits() -> Limits {
+        limits_from("bind_roots: [/NetApp/FileStore]\nstorages: [NetApp]\n")
+    }
+
+    fn limits_from(yaml: &str) -> Limits {
+        serde_yaml_ng::from_str(yaml).unwrap()
+    }
+
+    fn volumes_of(yaml: &str, limits: &Limits) -> Result<Vec<Volume>> {
+        volumes(&serde_yaml_ng::from_str(yaml).unwrap(), limits)
+    }
+
     #[test]
     fn classifies_volumes() {
         let spec: Value = serde_yaml_ng::from_str(SPEC).unwrap();
-        let v = volumes(&spec).unwrap();
+        let v = volumes(&spec, &limits()).unwrap();
         assert_eq!(v.len(), 3);
         assert_eq!(v[0].name, "db");
         assert!(
@@ -292,34 +402,110 @@ volumes:
         assert!(!valid_volume_name(".hidden"));
         assert!(!valid_volume_name("a b"));
         assert!(!valid_volume_name("it's"));
-        let spec: Value = serde_yaml_ng::from_str("volumes:\n  ../x: {}\n").unwrap();
-        assert!(volumes(&spec).is_err());
+        assert!(volumes_of("volumes:\n  ../x: {}\n", &limits()).is_err());
     }
 
     #[test]
     fn refuses_bad_x_pve() {
-        let spec: Value =
-            serde_yaml_ng::from_str("volumes:\n  a: { x-pve: { storage: s } }\n").unwrap();
-        assert!(volumes(&spec).is_err());
-        let spec: Value =
-            serde_yaml_ng::from_str("volumes:\n  a: { x-pve: { path: rel } }\n").unwrap();
-        assert!(volumes(&spec).is_err());
-        let spec: Value =
-            serde_yaml_ng::from_str("volumes:\n  a: { x-pve: { bogus: 1 } }\n").unwrap();
-        assert!(volumes(&spec).is_err());
-        let spec: Value =
-            serde_yaml_ng::from_str("volumes:\n  a: { x-pve: { path: /p, backup: 0 } }\n").unwrap();
-        assert!(volumes(&spec).is_err());
-        let spec: Value =
-            serde_yaml_ng::from_str("volumes:\n  a: { x-pve: { size: 1G, owner: \"x;id\" } }\n")
-                .unwrap();
-        assert!(volumes(&spec).is_err());
+        let l = limits();
+        assert!(volumes_of("volumes:\n  a: { x-pve: { storage: NetApp } }\n", &l).is_err());
+        assert!(volumes_of("volumes:\n  a: { x-pve: { path: rel } }\n", &l).is_err());
+        assert!(volumes_of("volumes:\n  a: { x-pve: { bogus: 1 } }\n", &l).is_err());
+        assert!(volumes_of(
+            "volumes:\n  a: { x-pve: { path: /NetApp/FileStore/x, backup: 0 } }\n",
+            &l
+        )
+        .is_err());
+        assert!(volumes_of(
+            "volumes:\n  a: { x-pve: { size: 1G, owner: \"x;id\" } }\n",
+            &l
+        )
+        .is_err());
+    }
+
+    /// A document is written with `VM.Config.Options` on the guest; the host
+    /// paths, storages and sizes it may ask for are the node's to allow.
+    #[test]
+    fn binds_are_refused_outside_the_allowed_roots() {
+        let closed = Limits::default();
+        let err = volumes_of("volumes:\n  a: { x-pve: { path: /etc } }\n", &closed)
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("limits.bind_roots"), "{err}");
+        assert!(err.contains("refused"), "{err}");
+
+        let l = limits_from("bind_roots: [/srv/media, /tank]\n");
+        for good in ["/srv/media", "/srv/media/movies", "/tank/x/y"] {
+            let spec = format!("volumes:\n  a: {{ x-pve: {{ path: {good} }} }}\n");
+            assert!(volumes_of(&spec, &l).is_ok(), "{good}");
+        }
+        for bad in [
+            "/etc",
+            "/srv",
+            "/srv/mediaX",
+            "/tank/../etc/pve",
+            "/srv/media/../../etc",
+            "/srv/media/./x",
+            "/srv/media/",
+            "//srv/media",
+            "srv/media",
+            "/",
+        ] {
+            let spec = format!("volumes:\n  a: {{ x-pve: {{ path: \"{bad}\" }} }}\n");
+            let err = volumes_of(&spec, &l).unwrap_err().to_string();
+            assert!(err.starts_with("spec.volumes.a.x-pve.path"), "{bad}: {err}");
+        }
+
+        // A root of `/` is the operator saying so, and takes everything clean.
+        let open = limits_from("bind_roots: ['/']\n");
+        assert!(volumes_of("volumes:\n  a: { x-pve: { path: /etc } }\n", &open).is_ok());
+        assert!(volumes_of("volumes:\n  a: { x-pve: { path: /etc/../x } }\n", &open).is_err());
+
+        // A bind root that is not itself a clean absolute path is the
+        // operator's mistake, and is named as one.
+        let bad_root = limits_from("bind_roots: [relative]\n");
+        let err = volumes_of("volumes:\n  a: { x-pve: { path: /x } }\n", &bad_root)
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("limits.bind_roots"), "{err}");
+    }
+
+    #[test]
+    fn storages_and_sizes_are_bounded() {
+        let l = limits_from("storages: [NetApp, local-lvm]\nmax_disk_gib: 8\n");
+        assert!(volumes_of("volumes:\n  a: { x-pve: { size: 8G } }\n", &l).is_ok());
+        assert!(volumes_of(
+            "volumes:\n  a: { x-pve: { storage: NetApp, size: 8G } }\n",
+            &l
+        )
+        .is_ok());
+        let err = volumes_of(
+            "volumes:\n  a: { x-pve: { storage: other, size: 1G } }\n",
+            &l,
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(err.contains("limits.storages"), "{err}");
+        let err = volumes_of("volumes:\n  a: { x-pve: { size: 9G } }\n", &l)
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("limits.max_disk_gib"), "{err}");
+
+        // No storage allowed anywhere: named storages are refused with the
+        // command that would allow one.
+        let err = volumes_of(
+            "volumes:\n  a: { x-pve: { storage: NetApp, size: 1G } }\n",
+            &Limits::default(),
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(err.contains("config set storage"), "{err}");
     }
 
     #[test]
     fn renders_binds_and_vars() {
         let spec: Value = serde_yaml_ng::from_str(SPEC).unwrap();
-        let v = volumes(&spec).unwrap();
+        let v = volumes(&spec, &limits()).unwrap();
         let vars = Vars {
             vmid: 105,
             uid: "1000".into(),

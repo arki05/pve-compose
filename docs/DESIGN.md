@@ -156,6 +156,21 @@ compose's charset, so a holder of a scoped pve-meta
 token, a lower privilege than the guest's PVE config, cannot turn a document
 into a root shell there. Volume names are checked the same way.
 
+## What a document may ask the node for is the node's to say
+
+A document is written with `VM.Config.Options` on the guest; the two things
+`x-pve` asks the node to do are what PVE grants far more narrowly: a bind
+mount is `root@pam` only, and allocating on a storage is `Datacenter.Allocate`
+plus that storage's own permission. So `bind_roots`, `storages` and
+`max_disk_gib` in `/etc/pve/pve-compose.cfg` bound them, checked in
+`spec::volumes` when the document is read, before a plan exists. Binds are
+refused by default: the key that allows them is the operator saying which
+directories every compose guest on the cluster may reach. Paths are compared
+as text, which is why a path with a `.`, `..` or empty segment is refused
+rather than normalised: normalising a path the kernel resolves through
+symlinks would be a guess at what the host will do with it. The README's
+"Trust" section says the same thing for the operator.
+
 ## What pve-meta could grow, noted while building this
 
 * A compose volume map entry with no body (`cache:`) is a YAML null, which

@@ -136,12 +136,16 @@ pve-compose daemon                                     # what the unit runs
 * named volumes: every one becomes `/opt/stack/volumes/<name>` and is bound
   there in the rendered file. `x-pve` says what backs it:
 
-| `x-pve` | backing |
-|---|---|
-| `{ storage?, size, owner?, backup? }` | a PVE disk mounted there; `backup` default on; `storage` defaults to this node's stored one, and without either the plan refuses |
-| `{ path, owner? }` | a bind of that host path (`backup` refused: PVE never backs up binds) |
-| none (`name: {}`) | a directory on the rootfs |
-| `external: true` on the volume | left alone |
+| `x-pve` | backing | bounded by |
+|---|---|---|
+| `{ storage?, size, owner?, backup? }` | a PVE disk mounted there; `backup` default on; `storage` defaults to this node's stored one, and without either the plan refuses | `limits.storages`, `limits.max_disk_gib` |
+| `{ path, owner? }` | a bind of that host path (`backup` refused: PVE never backs up binds) | `limits.bind_roots`; refused outright by default |
+| none (`name: {}`) | a directory on the rootfs | — |
+| `external: true` on the volume | left alone | — |
+
+The `limits` keys are the node's, not the document's; see "Trust" below.
+A volume outside them is refused when the document is read, by name and with
+the key that would allow it, and nothing is applied.
 
 Disks are identified by mount path, not index. They grow when `size` grows,
 never shrink, never move to another storage, and are never deleted: a volume
@@ -162,6 +166,44 @@ which storage the rootfs is on. Those are the guest's PVE config. The compose
 project name is the hostname, lowercased; `docker down` before renaming a
 running guest, or the old project keeps running beside the new.
 
+## Trust
+
+Writing a guest's document takes `VM.Config.Options` on that guest — a
+routine PVEVMAdmin-tier privilege. pve-compose then acts on that document as
+root on the node, so without bounds a document writer would gain two things
+PVE does not grant at that tier: bind mounts of any host path (PVE itself
+allows those to `root@pam` only), and disks of any size on any storage. A
+bind of `/`, of another guest's subvolume, of `/var/lib/vz/dump` or of
+`/etc/pve` is the whole node.
+
+Three keys in `/etc/pve/pve-compose.cfg` bound it, and a document outside them
+is refused before any plan exists:
+
+| key | scope | default | meaning |
+|---|---|---|---|
+| `limits.bind_roots` | cluster | empty | host directories an `x-pve.path` may be or be under. Empty: **no document gets a bind mount** |
+| `limits.storages` | cluster | empty | storages an `x-pve.storage` may name. Empty: only the storage this node's `storage` names, which is where a volume without one lands anyway |
+| `limits.max_disk_gib` | cluster | `64` | the largest disk one `x-pve.size` may ask for |
+
+```yaml
+limits:
+  bind_roots: [/NetApp/FileStore]
+  storages: [NetApp, local-lvm]
+  max_disk_gib: 200
+```
+
+A path is checked as text: it must be absolute, have no `.`, `..` or empty
+segment, and then be one of the roots or lie under one. Storage names are per
+node, so `limits.storages` is the union over the cluster; each node still only
+allocates on its own.
+
+What remains, with the keys set: a document writer chooses what runs in *their*
+container (which is theirs anyway), how much space it takes inside the allowed
+storages up to the ceiling, and which of the allowed host directories it binds.
+A bind root is shared with every compose guest on the cluster: list directories
+you would hand to all of them. Everything else about the wrapper — cores,
+memory, network, rootfs storage — is PVE config and needs PVE's own privileges.
+
 ## Stored choices
 
 `pve-compose config` shows every choice with its source; `config set` and
@@ -180,8 +222,9 @@ editing works too.
 | `rootfs-size` | cluster | `8G` | for `new` |
 
 Disk storage is per node on purpose: storage names differ per node, and a
-cluster-wide default would be a guess. The file also holds `daemon.interval`
-and `daemon.full_every` (30 and 600 seconds), by hand only.
+cluster-wide default would be a guess. The file also holds the `limits` keys
+above and `daemon.interval` and `daemon.full_every` (30 and 600 seconds), by
+hand only.
 
 The tag the tool watches is the `selector` of the `compose` prefix file
 (packaged, or the override at `/etc/pve/meta.d/prefixes/compose.yaml`);

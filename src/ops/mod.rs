@@ -37,6 +37,11 @@ impl Ctx {
         })
     }
 
+    /// What a document on this node may ask for (`config::Limits`).
+    pub fn limits(&self) -> crate::config::Limits {
+        self.config.limits_for(&self.node)
+    }
+
     /// Whether a guest with these tags is one the prefix reaches.
     pub fn selected(&self, tags: &[String]) -> bool {
         match &self.tag {
@@ -124,8 +129,8 @@ pub fn load(ctx: &Ctx, vmid: u32) -> Result<Guest> {
 pub fn load_with(ctx: &Ctx, read: doc::Read) -> Result<Guest> {
     let vmid = read.vmid;
     let config = pct::config(&ctx.node, vmid)?;
-    let volumes =
-        spec::volumes(&read.doc.spec).with_context(|| format!("guest {vmid}: compose.spec"))?;
+    let volumes = spec::volumes(&read.doc.spec, &ctx.limits())
+        .with_context(|| format!("guest {vmid}: compose.spec"))?;
     Ok(Guest {
         config,
         read,

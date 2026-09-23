@@ -12,6 +12,10 @@ defaults:
   memory: 2048
 nodes:                           # disk storage is per node: names differ per node
   # StorageCube: { storage: NetApp }
+limits:                          # what a guest's document may ask for (README, "Trust")
+  bind_roots: []                 # host directories an x-pve.path may be or be under; empty: no binds
+  storages: []                   # storages an x-pve.storage may name; empty: only the node's own
+  max_disk_gib: 64               # the largest disk one x-pve.size may ask for
 daemon:
   interval: 30                   # seconds between version-token polls
   full_every: 600                # seconds between unconditional passes

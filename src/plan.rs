@@ -321,8 +321,17 @@ mod tests {
         crate::doc::parse(yaml).unwrap()
     }
 
+    /// A node with a disk storage and one allowed bind root, the shape a
+    /// document's `x-pve` is held against.
     fn node_cfg(storage: &str) -> Config {
-        serde_yaml_ng::from_str(&format!("nodes:\n  n: {{ storage: {storage} }}\n")).unwrap()
+        serde_yaml_ng::from_str(&format!(
+            "nodes:\n  n: {{ storage: {storage} }}\nlimits:\n  bind_roots: [/m]\n"
+        ))
+        .unwrap()
+    }
+
+    fn vols_of(d: &Doc, cfg: &Config) -> Vec<Volume> {
+        spec::volumes(&d.spec, &cfg.limits_for("n")).unwrap()
     }
 
     #[test]
@@ -347,8 +356,8 @@ mod tests {
             r#"{"unprivileged":1,"rootfs":"local-lvm:vm-9-disk-0,size=6G","features":"nesting=1"}"#,
         );
         let d = doc("spec:\n  volumes:\n    db: { x-pve: { size: 20G } }\n    media: { x-pve: { path: /m } }\n    c:\n");
-        let vols = spec::volumes(&d.spec).unwrap();
         let cfg = node_cfg("local-lvm");
+        let vols = vols_of(&d, &cfg);
         let p = build(&Inputs {
             node: "n",
             config: &cfg,
@@ -374,8 +383,8 @@ mod tests {
     fn a_disk_without_any_storage_is_refused() {
         let g = guest(r#"{"unprivileged":1,"tags":"compose","features":"nesting=1,keyctl=1"}"#);
         let d = doc("spec:\n  volumes:\n    db: { x-pve: { size: 20G } }\n");
-        let vols = spec::volumes(&d.spec).unwrap();
         let cfg = Config::default();
+        let vols = vols_of(&d, &cfg);
         let err = build(&Inputs {
             node: "n",
             config: &cfg,
@@ -396,8 +405,8 @@ mod tests {
             "mp1":"local-lvm:vm-9-disk-2,mp=/opt/stack/volumes/db,size=20G,backup=1"}"#,
         );
         let d = doc("spec:\n  volumes:\n    db: { x-pve: { size: 20G } }\n");
-        let vols = spec::volumes(&d.spec).unwrap();
         let cfg = node_cfg("local-lvm");
+        let vols = vols_of(&d, &cfg);
         let p = build(&Inputs {
             node: "n",
             config: &cfg,
@@ -421,8 +430,8 @@ mod tests {
             "mp3":"local-lvm:vm-9-disk-4,mp=/opt/stack/volumes/big,size=50G,backup=1"}"#,
         );
         let d = doc("spec:\n  volumes:\n    db: { x-pve: { size: 20G } }\n    big: { x-pve: { size: 10G, backup: 0 } }\n");
-        let vols = spec::volumes(&d.spec).unwrap();
         let cfg = node_cfg("local-lvm");
+        let vols = vols_of(&d, &cfg);
         let p = build(&Inputs {
             node: "n",
             config: &cfg,
@@ -448,8 +457,8 @@ mod tests {
     fn node_storage_default_applies() {
         let g = guest(r#"{"unprivileged":1,"tags":"compose","features":"nesting=1,keyctl=1"}"#);
         let d = doc("spec:\n  volumes:\n    db: { x-pve: { size: 2G } }\n");
-        let vols = spec::volumes(&d.spec).unwrap();
         let cfg = node_cfg("NetApp");
+        let vols = vols_of(&d, &cfg);
         let p = build(&Inputs {
             node: "n",
             config: &cfg,
