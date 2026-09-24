@@ -62,6 +62,16 @@ prefix-file declaration the editor renders as a button. Not a flag in the
 document: a flag has no log, sticks when the daemon is down, and a snapshot
 rollback would re-fire it.
 
+## Forgetting guest-files' records
+
+0.0.3 to 0.0.6 wrote the stack's two files through pve-meta-guest-files,
+which left `managed/compose/*` records in each guest's
+`/etc/pve-meta/.guest-files`. Files are written with plain `pct push` now,
+and the records are left alone on purpose (`docs/DESIGN.md`, "Files go in
+with `pct push`"): nothing deletes a managed file, and guest-files is on its
+way out. A one-shot removal of them is only worth writing if one turns out
+to get in the way.
+
 ## pve-meta items this tool would use
 
 * `additionalProperties` schemas, so `spec.volumes.<any>.x-pve` gets typed

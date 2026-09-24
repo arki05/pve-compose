@@ -42,6 +42,9 @@ gets this inside:
 ```
 
 and `cd /opt/stack && docker compose up -d` is what runs, by the tool or by you.
+`compose.yaml` and `applied.yaml` are the tool's, written with `pct push` (to
+a sibling, then renamed over), root `0644`; nothing else in the guest is
+written by it.
 
 Two halves, in the CLI and in `policy`:
 
