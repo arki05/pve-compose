@@ -7,15 +7,19 @@
 //!
 //! Every call has a deadline. The loop is single-threaded and most of what it
 //! runs ends up inside a guest, so one hung `docker info` or `apt-get` in one
-//! container must not hold the node's other guests for good: `run` goes
-//! through [`pve_meta_guest_files::pct::run`], which kills the process group
-//! past the deadline and caps the output, and `stream` does the same killing
-//! around an inherited terminal. [`TIMEOUT`] covers reads, probes and PVE's
+//! container must not hold the node's other guests for good: `run` starts
+//! the command in a process group of its own, kills the whole group past the
+//! deadline, and caps what it reads ([`MAX_OUTPUT`], [`STDERR_CAP`]); `stream`
+//! does the same killing around an inherited terminal. [`TIMEOUT`] covers reads, probes and PVE's
 //! own quick verbs; [`LONG_TIMEOUT`] is for the ones that legitimately take
 //! minutes (a compose up that pulls, the docker install, a template
 //! download, a disk allocation) and is named at those call sites.
 
+use std::io::Read;
 use std::process::{Command, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, bail, Context, Result};
@@ -25,6 +29,12 @@ pub const TIMEOUT: Duration = Duration::from_secs(120);
 
 /// The deadline for the slow ones, asked for explicitly.
 pub const LONG_TIMEOUT: Duration = Duration::from_secs(30 * 60);
+
+/// The most stdout a captured command may produce.
+pub const MAX_OUTPUT: usize = 4 * 1024 * 1024;
+
+/// The most stderr a captured command may produce.
+pub const STDERR_CAP: usize = 64 * 1024;
 
 /// Captured output of a finished command.
 #[derive(Debug)]
@@ -84,11 +94,89 @@ pub fn run_status_within(program: &str, args: &[&str], timeout: Duration) -> Res
     if verbose() {
         eprintln!("+ {}", render(program, args));
     }
-    let out = pve_meta_guest_files::pct::run(program, args, None, timeout)?;
+    let mut child = {
+        use std::os::unix::process::CommandExt as _;
+        Command::new(program)
+            .args(args)
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .process_group(0)
+            .spawn()
+            .with_context(|| format!("cannot run {program}"))?
+    };
+    let over = Arc::new(AtomicBool::new(false));
+    let out = capped(
+        child.stdout.take().expect("piped"),
+        MAX_OUTPUT,
+        over.clone(),
+    );
+    let err = capped(
+        child.stderr.take().expect("piped"),
+        STDERR_CAP,
+        over.clone(),
+    );
+    let what = format!("{program} {}", args.first().unwrap_or(&""));
+    let pgid = child.id() as i32;
+    // SAFETY: kill(2) on the negated id of the group the child leads.
+    let kill = || unsafe { libc::kill(-pgid, libc::SIGKILL) };
+    let deadline = Instant::now() + timeout;
+    let mut status = None;
+    // Done when the command has exited and both pipes are at EOF: something
+    // it left behind in its group still holding a pipe counts as not done,
+    // so it is under the same deadline.
+    loop {
+        if over.load(Ordering::Relaxed) {
+            kill();
+            let _ = child.wait();
+            bail!("{what}: more output than allowed, killed");
+        }
+        if status.is_none() {
+            status = child.try_wait()?;
+        }
+        if status.is_some() && out.is_finished() && err.is_finished() {
+            break;
+        }
+        if Instant::now() >= deadline {
+            kill();
+            let _ = child.wait();
+            bail!("{what}: no answer after {}s, killed", timeout.as_secs());
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    let stdout = out.join().unwrap_or_default();
+    let stderr = err.join().unwrap_or_default();
+    if over.load(Ordering::Relaxed) {
+        bail!("{what}: more output than allowed");
+    }
     Ok(Output {
-        status: out.status,
-        stdout: String::from_utf8_lossy(&out.stdout).into_owned(),
-        stderr: out.stderr,
+        status: status.and_then(|s| s.code()).unwrap_or(-1),
+        stdout: String::from_utf8_lossy(&stdout).into_owned(),
+        stderr: String::from_utf8_lossy(&stderr).trim().to_string(),
+    })
+}
+
+/// Reads `r` to its end on a thread of its own, up to `cap` bytes; past it,
+/// stops reading and raises `over`, which gets the command killed.
+fn capped<R: Read + Send + 'static>(
+    mut r: R,
+    cap: usize,
+    over: Arc<AtomicBool>,
+) -> JoinHandle<Vec<u8>> {
+    std::thread::spawn(move || {
+        let mut buf = Vec::new();
+        let mut chunk = [0u8; 8192];
+        loop {
+            match r.read(&mut chunk) {
+                Ok(0) | Err(_) => break,
+                Ok(n) if buf.len() + n > cap => {
+                    over.store(true, Ordering::Relaxed);
+                    break;
+                }
+                Ok(n) => buf.extend_from_slice(&chunk[..n]),
+            }
+        }
+        buf
     })
 }
 
@@ -243,6 +331,48 @@ mod tests {
         .to_string();
         assert!(err.contains("no answer after 0s, killed"), "{err}");
         assert!(started.elapsed() < Duration::from_secs(10));
+    }
+
+    #[test]
+    fn what_it_leaves_behind_holding_a_pipe_is_killed_too() {
+        let started = Instant::now();
+        let err = run_status_within(
+            "sh",
+            &["-c", "sleep 30 & echo started"],
+            Duration::from_millis(300),
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(err.contains("no answer after 0s, killed"), "{err}");
+        assert!(started.elapsed() < Duration::from_secs(10));
+    }
+
+    #[test]
+    fn output_is_capped() {
+        let started = Instant::now();
+        let err = run_status_within("sh", &["-c", "yes"], Duration::from_secs(30))
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("more output than allowed"), "{err}");
+        let err = run_status_within("sh", &["-c", "yes >&2"], Duration::from_secs(30))
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("more output than allowed"), "{err}");
+        assert!(started.elapsed() < Duration::from_secs(10));
+        // Right at the cap is fine.
+        let out = run_status("sh", &["-c", &format!("head -c {MAX_OUTPUT} /dev/zero")]).unwrap();
+        assert_eq!(out.stdout.len(), MAX_OUTPUT);
+    }
+
+    #[test]
+    fn a_missing_program_is_an_error_naming_it() {
+        let err = run_status("/nonexistent/pve-compose-test", &[])
+            .unwrap_err()
+            .to_string();
+        assert!(
+            err.contains("cannot run /nonexistent/pve-compose-test"),
+            "{err}"
+        );
     }
 
     #[test]

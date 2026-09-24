@@ -71,6 +71,34 @@ substituted and `${PVE_*}` expanded. No override file, no generated env file:
 `cd /opt/stack && docker compose up -d` is exactly what the tool runs and what a
 human can run. `.env` is the user's and is never read or written by the tool.
 
+## Files go in with `pct push`, and are the tool's
+
+The two files the tool writes in the guest, `compose.yaml` and
+`.pve-compose/applied.yaml`, go in the way PVE puts a file into a container:
+`pct push`, which joins the guest's namespaces as its root and writes. That is
+the whole trust model. PVE does not defend against the guest's own root, and
+neither does this: no manifest, no hashes, no drift protection, no bookkeeping
+of who else wrote a path. The tool owns the paths it writes and every apply
+overwrites them; a hand edit of `compose.yaml` lasts until the next one.
+
+`pct push` truncates the target and writes into it, so a call killed halfway
+would leave half a file, and a facts file cut short fails every read after
+it, the loop's included. So a write is `mkdir -p` of the parent, a push to a
+dot-named sibling (`--perms 0644 --user 0 --group 0`), and an `mv -f` over
+the target: a reader sees the old file or the new one. The host copy is
+root `0600` and removed whatever happens. The per-guest lock every caller
+already holds is what keeps two writes of one file apart.
+
+From 0.0.3 to 0.0.6 these files went through the pve-meta-guest-files
+library's managed plane, which recorded them as `managed/compose/<name>` in
+the guest's `/etc/pve-meta/.guest-files`. Those records are left in place:
+guest-files only ever deletes files its user plane recorded (a managed record
+is never collected, whatever the document says), and a record whose file is
+gone is simply forgotten. What a stale record still does is harmless: it
+keeps the guest-files daemon glancing at the guest, and it refuses a
+`guest-files` entry that names `/opt/stack/compose.yaml`, which should not
+exist anyway. guest-files is deprecated, and its manifests go with it.
+
 ## No migrate verb
 
 "The same stack on a fresh wrapper" was built three times in one day and
@@ -125,9 +153,10 @@ long. Acceptable at this scale, and nothing interleaves. What is not acceptable
 is *forever*: a container whose docker daemon is wedged answers no `pct exec` at
 all, so every call has a deadline (`cmd::TIMEOUT`, `cmd::LONG_TIMEOUT`) and is
 killed with its process group past it, which fails that guest and leaves the
-pass to the others. The bounded runner is guest-files' own
-(`pve_meta_guest_files::pct::run`), the one that already writes the files,
-rather than a second one here.
+pass to the others. The runner is a few lines in `cmd.rs`: a process group
+per command, killed whole past the deadline or past 4 MiB of stdout or 64 KiB
+of stderr, and a command counts as done only once both pipes are closed, so
+something it left running behind it is under the same deadline.
 
 ## The loop applies changes; it never starts a stack
 
