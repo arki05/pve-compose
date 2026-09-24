@@ -1,3 +1,20 @@
+pve-compose (0.0.7-1) trixie; urgency=medium
+
+  * compose.yaml and the facts file go into the guest with `pct push`
+    again, no longer through pve-meta-guest-files, which is being
+    deprecated: pushed to a sibling and renamed over the target, root
+    0644, under the per-guest lock. No manifest, no drift protection; the
+    tool owns the two paths and apply overwrites them.
+  * The bounded command runner (process group killed past the deadline,
+    4 MiB stdout / 64 KiB stderr caps) is pve-compose's own. A command
+    that leaves something behind holding its output open is now under the
+    same deadline.
+  * The pve-meta-guest-files dependency is gone. Existing
+    `managed/compose/*` records in a guest's /etc/pve-meta/.guest-files
+    are left in place: guest-files never deletes a managed file.
+
+ -- Julius Arkenberg <julius@rkenberg.de>  Fri, 25 Sep 2026 01:56:13 +0200
+
 pve-compose (0.0.6-1) trixie; urgency=medium
 
   * CI lint fix (needless struct update on newer clippy). 0.0.5 never
