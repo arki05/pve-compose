@@ -302,7 +302,7 @@ pub fn exec_status(vmid: u32, script: &str) -> Result<cmd::Output> {
 pub fn exec_status_within(vmid: u32, script: &str, timeout: Duration) -> Result<cmd::Output> {
     let vm = vmid.to_string();
     cmd::run_status_within(
-        "pct",
+        &program(),
         &["exec", &vm, "--", "/bin/sh", "-c", script],
         timeout,
     )
@@ -349,8 +349,7 @@ pub const MAX_READ: usize = 1 << 20;
 
 /// Reads a file from inside the guest. `Ok(None)` when it does not exist, an
 /// error above [`MAX_READ`] bytes: `head` stops one byte past the cap, so
-/// neither the guest nor the node ever carries more (guest-files' `Pct::read`
-/// does the same).
+/// neither the guest nor the node ever carries more.
 pub fn read_file(vmid: u32, path: &str) -> Result<Option<String>> {
     let script = format!(
         "if [ -e '{path}' ]; then exec head -c {} '{path}'; else exit 3; fi",
@@ -370,9 +369,101 @@ pub fn read_file(vmid: u32, path: &str) -> Result<Option<String>> {
     }
 }
 
-// File writes inside the guest go through the guest-files library
-// (`stack::write_managed`): validated paths, atomic rename and manifest
-// tracking, not a bare `pct push`.
+/// Writes `content` to the absolute `path` inside the guest, owned by the
+/// guest's root with mode `perms` (octal text, `0644`), with `pct push`: as
+/// the guest's root, in its namespaces, which is all the trust PVE itself
+/// puts in a file push. The parent directory is made first.
+///
+/// `pct push` truncates the target and writes into it, so the content goes
+/// to a sibling first and is renamed over the target: a reader, or the next
+/// apply after a killed one, sees the old file or the new one, never half of
+/// one. A facts file cut short would fail every later read of it. The
+/// sibling's name is fixed; the caller holds the guest's lock, so no two
+/// writes of one file run at once. The host copy is root `0600` and removed
+/// whatever happens.
+pub fn write_file(vmid: u32, path: &str, content: &[u8], perms: &str) -> Result<()> {
+    let (dir, name) = path
+        .rsplit_once('/')
+        .filter(|(d, n)| path.starts_with('/') && !d.is_empty() && !n.is_empty())
+        .filter(|_| !path.contains('\'') && !path.contains("/../") && !path.contains("/./"))
+        .ok_or_else(|| anyhow!("{path}: not a path this tool writes"))?;
+    let staged = format!("{dir}/.{name}.pve-compose-tmp");
+    let host = HostCopy::new(vmid, content)?;
+    exec(vmid, &format!("mkdir -p '{dir}'"))?;
+    let vm = vmid.to_string();
+    let pushed = cmd::run(
+        &program(),
+        &[
+            "push",
+            &vm,
+            host.path(),
+            &staged,
+            "--perms",
+            perms,
+            "--user",
+            "0",
+            "--group",
+            "0",
+        ],
+    );
+    if let Err(e) = pushed {
+        let _ = exec_status(vmid, &format!("rm -f '{staged}'"));
+        return Err(e).with_context(|| format!("guest {vmid}: cannot push {path}"));
+    }
+    exec(vmid, &format!("mv -f '{staged}' '{path}'")).map(|_| ())
+}
+
+/// The host side of a push: a file only root can read, gone when dropped.
+struct HostCopy(std::path::PathBuf);
+
+impl HostCopy {
+    fn new(vmid: u32, content: &[u8]) -> Result<Self> {
+        use std::io::Write as _;
+        use std::os::unix::fs::OpenOptionsExt as _;
+        static N: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let n = N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let path = std::env::temp_dir().join(format!(
+            "pve-compose-push-{vmid}-{}-{n}",
+            std::process::id()
+        ));
+        let copy = HostCopy(path);
+        let mut f = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(&copy.0)
+            .with_context(|| format!("cannot create {}", copy.0.display()))?;
+        f.write_all(content)
+            .with_context(|| format!("cannot write {}", copy.0.display()))?;
+        Ok(copy)
+    }
+
+    fn path(&self) -> &str {
+        self.0.to_str().expect("temp paths are UTF-8")
+    }
+}
+
+impl Drop for HostCopy {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.0);
+    }
+}
+
+/// The `pct` binary: `pct`, except in tests, which put a fake in its place.
+#[cfg(not(test))]
+fn program() -> String {
+    "pct".to_string()
+}
+
+#[cfg(test)]
+thread_local! {
+    static PROGRAM: std::cell::RefCell<String> = std::cell::RefCell::new("pct".to_string());
+}
+
+#[cfg(test)]
+fn program() -> String {
+    PROGRAM.with(|p| p.borrow().clone())
+}
 
 pub fn start(vmid: u32) -> Result<()> {
     cmd::run_within("pct", &["start", &vmid.to_string()], cmd::LONG_TIMEOUT).map(|_| ())
@@ -498,5 +589,122 @@ mod tests {
         assert_eq!(c.free_mp_index(), 1);
         assert!(c.mount_at("/opt/stack").is_some());
         assert_eq!(c.rootfs.unwrap().size.unwrap().to_string(), "6G");
+    }
+
+    /// A fake `pct` in a directory of its own: it logs every call, one line
+    /// each, keeps a copy of what it was asked to push (mode included), and
+    /// fails a push when `fail_push`.
+    fn fake_pct(tag: &str, fail_push: bool) -> std::path::PathBuf {
+        use std::os::unix::fs::PermissionsExt as _;
+        let dir =
+            std::env::temp_dir().join(format!("pve-compose-fake-pct-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let script = format!(
+            "#!/bin/sh\nprintf '%s\\n' \"$*\" >> '{d}/calls'\n\
+             if [ \"$1\" = push ]; then\n  cp -p \"$3\" '{d}/pushed' || exit 1\n  {fail}\nfi\nexit 0\n",
+            d = dir.display(),
+            fail = if fail_push { "echo 'no space left' >&2; exit 5" } else { ":" },
+        );
+        let bin = dir.join("pct");
+        std::fs::write(&bin, script).unwrap();
+        std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).unwrap();
+        PROGRAM.with(|p| *p.borrow_mut() = bin.to_str().unwrap().to_string());
+        dir
+    }
+
+    fn calls(dir: &std::path::Path) -> Vec<String> {
+        std::fs::read_to_string(dir.join("calls"))
+            .unwrap()
+            .lines()
+            .map(String::from)
+            .collect()
+    }
+
+    #[test]
+    fn a_write_is_mkdir_push_to_a_sibling_and_rename() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let dir = fake_pct("ok", false);
+        write_file(105, "/opt/stack/compose.yaml", b"name: x\n", "0644").unwrap();
+        let c = calls(&dir);
+        assert_eq!(c.len(), 3, "{c:?}");
+        assert_eq!(c[0], "exec 105 -- /bin/sh -c mkdir -p '/opt/stack'");
+        let push: Vec<&str> = c[1].split(' ').collect();
+        assert_eq!(&push[..2], &["push", "105"]);
+        assert_eq!(
+            &push[3..],
+            &[
+                "/opt/stack/.compose.yaml.pve-compose-tmp",
+                "--perms",
+                "0644",
+                "--user",
+                "0",
+                "--group",
+                "0"
+            ]
+        );
+        assert_eq!(
+            c[2],
+            "exec 105 -- /bin/sh -c mv -f '/opt/stack/.compose.yaml.pve-compose-tmp' '/opt/stack/compose.yaml'"
+        );
+        // The host copy held the content, was root's alone, and is gone.
+        let pushed = dir.join("pushed");
+        assert_eq!(std::fs::read(&pushed).unwrap(), b"name: x\n");
+        let mode = std::fs::metadata(&pushed).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600);
+        assert!(
+            !std::path::Path::new(push[2]).exists(),
+            "{} left behind",
+            push[2]
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_failed_push_removes_the_sibling_and_never_renames() {
+        let dir = fake_pct("fail", true);
+        let err = write_file(
+            105,
+            "/opt/stack/.pve-compose/applied.yaml",
+            b"d: x\n",
+            "0644",
+        )
+        .unwrap_err();
+        let text = format!("{err:#}");
+        assert!(
+            text.contains("cannot push /opt/stack/.pve-compose/applied.yaml"),
+            "{text}"
+        );
+        assert!(
+            text.contains("exit 5") && text.contains("no space left"),
+            "{text}"
+        );
+        let c = calls(&dir);
+        assert_eq!(c.len(), 3, "{c:?}");
+        assert!(c[1].starts_with("push 105 "), "{c:?}");
+        assert_eq!(
+            c[2],
+            "exec 105 -- /bin/sh -c rm -f '/opt/stack/.pve-compose/.applied.yaml.pve-compose-tmp'"
+        );
+        let host = c[1].split(' ').nth(2).unwrap();
+        assert!(!std::path::Path::new(host).exists(), "{host} left behind");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn only_plain_absolute_paths_are_written() {
+        let dir = fake_pct("paths", false);
+        for p in [
+            "compose.yaml",
+            "/",
+            "/opt/",
+            "/opt/it's",
+            "/opt/../etc/x",
+            "/opt/./x",
+        ] {
+            assert!(write_file(105, p, b"", "0644").is_err(), "{p}");
+        }
+        assert!(!dir.join("calls").exists());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

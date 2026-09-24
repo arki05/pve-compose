@@ -17,7 +17,6 @@ path = "src/main.rs"
 
 [dependencies]
 anyhow = "1"
-pve-meta-guest-files = { git = "https://github.com/arki05/pve-meta.git", tag = "v0.3.2" }
 clap = { version = "4", features = ["derive"] }
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 hex = "0.4"

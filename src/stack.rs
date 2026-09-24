@@ -13,20 +13,11 @@
 //! rendered file carries the project name as its top-level `name:`, so a
 //! human typing the same thing gets the same stack.
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
-
-use pve_meta_guest_files::entry::{Desired, Entry, FileFormat, GuestFiles, LocalEdits};
-use pve_meta_guest_files::guest::{self, Outcome};
-use pve_meta_guest_files::lock::GuestLock;
-use pve_meta_guest_files::pct::Pct;
-use pve_meta_guest_files::plan::Action;
 
 use crate::pct;
 use crate::{FACTS_DIR, STACK_DIR, VOLUMES_DIR};
-
-/// This operator's name in manifest sources (`managed/compose/<name>`).
-const OPERATOR: &str = "compose";
 
 pub const COMPOSE_FILE: &str = "/opt/stack/compose.yaml";
 pub const ENV_FILE: &str = "/opt/stack/.env";
@@ -58,7 +49,7 @@ pub fn read_facts(vmid: u32) -> Result<Option<Facts>> {
 
 pub fn write_facts(vmid: u32, facts: &Facts) -> Result<()> {
     let text = serde_yaml_ng::to_string(facts)?;
-    write_managed(vmid, "facts", FACTS_FILE, &text)
+    pct::write_file(vmid, FACTS_FILE, text.as_bytes(), "0644")
 }
 
 /// New facts for an apply, keeping what the previous facts knew about the
@@ -93,52 +84,10 @@ pub fn read_compose(vmid: u32) -> Result<Option<String>> {
     pct::read_file(vmid, COMPOSE_FILE)
 }
 
+/// Writes the rendered compose file, root `0644`. It is this tool's: a
+/// hand edit is overwritten on the next apply, which is what converging is.
 pub fn write_compose(vmid: u32, text: &str) -> Result<()> {
-    write_managed(vmid, "compose", COMPOSE_FILE, text)
-}
-
-/// A file compose owns inside the guest, through the guest-files library:
-/// validated paths, atomic rename, manifest tracking under the daemon's
-/// lock, and refusal (by name) when another writer recorded the path.
-/// `Overwrite` keeps the old `pct push` semantics: apply converges.
-fn write_managed(vmid: u32, name: &str, path: &str, content: &str) -> Result<()> {
-    let entry = Entry::managed(
-        OPERATOR,
-        name,
-        path,
-        FileFormat::Yaml,
-        "0644",
-        "0:0",
-        LocalEdits::Overwrite,
-    )
-    .map_err(anyhow::Error::msg)?;
-    let files = GuestFiles::managed(vec![
-        Desired::direct(entry, content.as_bytes().to_vec()).map_err(anyhow::Error::msg)?
-    ])
-    .map_err(anyhow::Error::msg)?;
-    let _lock = GuestLock::take(vmid, true)
-        .with_context(|| format!("guest {vmid}: cannot take the guest-files lock"))?;
-    let report = guest::sync(&mut Pct { vmid }, &files, false)?;
-    if let Some(w) = &report.warning {
-        eprintln!("guest {vmid}: warning: {w}");
-    }
-    let mut problems = Vec::new();
-    for d in &report.items {
-        let clean = !matches!(d.item.action, Action::Refused(_))
-            && matches!(d.outcome, None | Some(Outcome::Done));
-        if let Some(line) = guest::describe(d) {
-            if !clean {
-                problems.push(line);
-            }
-        } else if !clean {
-            problems.push(format!("{path}: not written cleanly"));
-        }
-    }
-    if problems.is_empty() {
-        Ok(())
-    } else {
-        bail!("guest {vmid}: {}\n{}", path, problems.join("\n"))
-    }
+    pct::write_file(vmid, COMPOSE_FILE, text.as_bytes(), "0644")
 }
 
 fn compose() -> String {
